@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import zstandard
+
 from msys2_dataset.io import (
     compress_file_zstd,
     decompress_file_zstd,
@@ -18,7 +19,6 @@ from msys2_dataset.io import (
     write_csv,
     write_jsonl,
 )
-
 from tests.helpers import scratch_dir
 
 

@@ -126,10 +126,16 @@ exclude = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Declare the src layout so isort classifies first-party imports identically
+# whether or not the package happens to be installed in the environment.
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["msys2_dataset", "tests", "tools"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011"]

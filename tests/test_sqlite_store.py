@@ -17,7 +17,6 @@ from msys2_dataset.sqlite_store import (
     table_names,
     write_rows,
 )
-
 from tests.helpers import scratch_dir
 
 

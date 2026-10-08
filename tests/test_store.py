@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 
 import zstandard
+
 from msys2_dataset.store import (
     FAT32_MAX_BYTES,
     PartWriter,
@@ -28,7 +29,6 @@ from msys2_dataset.store import (
     read_table,
     write_table,
 )
-
 from tests.helpers import scratch_dir
 
 MAX_4GB = 4 * 1024**3
