@@ -20,7 +20,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Unit tests use checked-in fixtures; the data/ submodules are not needed.
+          # Unit tests read .gitmodules and the git index, not submodule
+          # working trees, so the data/ submodules are not needed here.
           submodules: false
 
       - name: Install uv
@@ -29,31 +30,35 @@ jobs:
       - name: Install Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
-      # `uv python install` shims the requested interpreter onto PATH; assert it
-      # so a silent fallback to the runner's default Python cannot slip through.
-      - name: Verify interpreter
-        run: python --version
-
-      # pyproject.toml is gitignored, so the runner regenerates it with the
-      # same tool that local dev and Codespaces use. That keeps a single
-      # definition of the dependency set instead of duplicating it per runner.
+      # pyproject.toml is gitignored, so the runner regenerates it with the same
+      # tool that local dev and Codespaces use: one definition of the dependency
+      # set, and the generator's --check mode guards against drift.
       - name: Generate pyproject.toml from requirements.txt
-        run: python tools/gen_pyproject.py
-
-      - name: Install package and test dependencies
         env:
-          # Build isolation is disabled so the build backend resolves in the
-          # target interpreter rather than a throwaway venv.
-          UV_NO_BUILD_ISOLATION: "1"
+          # Pin the interpreter uv selects, so the venv matches the matrix entry.
+          UV_PYTHON: ${{ matrix.python-version }}
         run: |
-          uv pip install --system .
-          uv pip install --system pytest ruff
+          python tools/gen_pyproject.py
+          python tools/gen_pyproject.py --check
+
+      # `uv sync` creates a project venv for the pinned interpreter. Installing
+      # into the system prefix is not an option: Ubuntu runners are PEP 668
+      # "externally managed" and reject `pip install` outside a venv.
+      - name: Create environment and install the package
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+        run: |
+          uv sync
+          uv pip install pytest ruff
+
+      - name: Verify interpreter
+        run: uv run python --version
 
       - name: Lint with ruff
-        run: ruff check src tests tools
+        run: uv run ruff check src tests tools
+
+      - name: Check formatting
+        run: uv run ruff format --check src tests tools
 
       - name: Run tests
-        env:
-          # Keep the src-layout importable even if the install step is skipped.
-          PYTHONPATH: src
-        run: python -m pytest tests -q
+        run: uv run python -m pytest tests -q
