@@ -22,3 +22,4 @@
 
 # git submodules must never be annexed.
 data/repo/** annex.largefiles=nothing
+**/.git* annex.largefiles=nothing
