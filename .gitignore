@@ -227,3 +227,15 @@ uv.lock
 .pytest-scratch-old-*/
 pytest-cache-files-*/
 .uv-cache/
+.notebook-tmp/
+.jupyter-data/
+.jupyter-runtime/
+.jupyter-config/
+.jupyter-tmp/
+
+# Generated dataset artifacts: keep the directories, not their contents.
+# (Tracked inputs live in data/*.tsv and the data/repo submodules.)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
