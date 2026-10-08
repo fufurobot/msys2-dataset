@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 #: Scratch root inside the workspace; gitignored.
 SCRATCH_ROOT = Path(__file__).resolve().parents[1] / ".pytest-scratch"

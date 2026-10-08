@@ -12,28 +12,24 @@ Constraints pinned here:
 
 from __future__ import annotations
 
-import io
-import json
 import random
 import tarfile
 import unittest
 from pathlib import Path
 
-from tests.helpers import scratch_dir
-
 import zstandard
-
-
 from msys2_dataset.store import (
     FAT32_MAX_BYTES,
     PartWriter,
     iter_part_names,
-    part_name,
     parse_part_name,
+    part_name,
     read_parts,
     read_table,
     write_table,
 )
+
+from tests.helpers import scratch_dir
 
 MAX_4GB = 4 * 1024**3
 

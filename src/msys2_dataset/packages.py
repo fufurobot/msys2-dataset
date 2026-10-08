@@ -12,9 +12,9 @@ package is itself a meaningful observation for this dataset.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
 
 __all__ = [
     "PackageEntry",
@@ -156,9 +156,7 @@ def pair_packages(
         if existing is None:
             by_key[key] = PackagePair(name=key, mingw=entry)
         else:
-            by_key[key] = PackagePair(
-                name=key, msys2=existing.msys2, mingw=entry
-            )
+            by_key[key] = PackagePair(name=key, msys2=existing.msys2, mingw=entry)
 
     pairs: list[PackagePair] = []
     for key in sorted(by_key):

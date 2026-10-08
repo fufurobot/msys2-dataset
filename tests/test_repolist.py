@@ -12,11 +12,10 @@ from pathlib import Path
 
 from msys2_dataset.repolist import (
     RepoEntry,
-    parse_repo_list,
-    parse_repo_list_text,
-    repo_dir_name,
     build_submodule_plan,
+    parse_repo_list_text,
     read_repo_list,
+    repo_dir_name,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -62,9 +61,7 @@ class TestParseRepoListText(unittest.TestCase):
         self.assertEqual(entries[0].url, "https://github.com/msys2/msys2-packages.git")
 
     def test_supports_name_override_column(self) -> None:
-        entries = parse_repo_list_text(
-            "https://github.com/msys2/msys2-packages.git msys2\n"
-        )
+        entries = parse_repo_list_text("https://github.com/msys2/msys2-packages.git msys2\n")
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].name, "msys2")
         self.assertEqual(entries[0].url, "https://github.com/msys2/msys2-packages.git")
@@ -96,9 +93,7 @@ class TestReadRepoList(unittest.TestCase):
     def test_reads_committed_repo_list(self) -> None:
         path = FIXTURES / "repo-list.txt"
         entries = read_repo_list(path)
-        self.assertEqual(
-            [e.name for e in entries], ["msys2-packages", "MINGW-packages"]
-        )
+        self.assertEqual([e.name for e in entries], ["msys2-packages", "MINGW-packages"])
 
     def test_missing_file_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):

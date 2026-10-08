@@ -176,7 +176,9 @@ class TestRealDataEndToEnd(unittest.TestCase):
         self.assertGreater(len(mingw), 100)
         stats = summarise(pair_packages(msys2, mingw))
         self.assertGreater(stats["paired"], 50)
-        self.assertEqual(stats["total"], stats["paired"] + stats["msys2_only"] + stats["mingw_only"])
+        self.assertEqual(
+            stats["total"], stats["paired"] + stats["msys2_only"] + stats["mingw_only"]
+        )
 
 
 if __name__ == "__main__":

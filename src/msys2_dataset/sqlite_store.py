@@ -9,9 +9,10 @@ the column order taken from the first row.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any
 
 __all__ = [
     "load_rows",
@@ -88,9 +89,7 @@ def write_rows(
     ``if_exists`` is one of ``replace`` (default), ``append`` or ``fail``.
     """
     if if_exists not in _VALID_IF_EXISTS:
-        raise ValueError(
-            f"if_exists must be one of {sorted(_VALID_IF_EXISTS)}, got {if_exists!r}"
-        )
+        raise ValueError(f"if_exists must be one of {sorted(_VALID_IF_EXISTS)}, got {if_exists!r}")
     if not rows:
         raise ValueError("cannot write an empty row set: column types are unknown")
 
@@ -116,14 +115,13 @@ def write_rows(
 
         if not exists or if_exists == "replace":
             decls = ", ".join(
-                f"{col} {_sql_type(rows[0][name])}" for col, name in zip(col_sql, columns)
+                f"{col} {_sql_type(rows[0][name])}"
+                for col, name in zip(col_sql, columns, strict=False)
             )
             conn.execute(f"CREATE TABLE {table_sql} ({decls})")
 
         placeholders = ", ".join("?" for _ in columns)
-        sql = (
-            f"INSERT INTO {table_sql} ({', '.join(col_sql)}) VALUES ({placeholders})"
-        )
+        sql = f"INSERT INTO {table_sql} ({', '.join(col_sql)}) VALUES ({placeholders})"
         conn.executemany(sql, [[row.get(name) for name in columns] for row in rows])
     return len(rows)
 
@@ -133,9 +131,7 @@ def load_rows(path: str | Path, table: str) -> list[dict[str, Any]]:
     return query_rows(path, f"SELECT * FROM {_quote(table)}")
 
 
-def query_rows(
-    path: str | Path, sql: str, params: Sequence[Any] = ()
-) -> list[dict[str, Any]]:
+def query_rows(path: str | Path, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
     """Run ``sql`` and return rows as dicts."""
     with open_db(path) as conn:
         rows = conn.execute(sql, tuple(params)).fetchall()

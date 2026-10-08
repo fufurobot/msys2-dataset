@@ -27,10 +27,7 @@ class TestGenPyproject(unittest.TestCase):
         with scratch_dir("gp1") as tmp:
             req = Path(tmp) / "requirements.txt"
             req.write_text(
-                "# a comment\n"
-                "pandas==2.2.2\n"
-                "\n"
-                "numpy==1.26.4  # inline comment\n",
+                "# a comment\n" "pandas==2.2.2\n" "\n" "numpy==1.26.4  # inline comment\n",
                 encoding="utf-8",
             )
             self.assertEqual(
@@ -54,9 +51,7 @@ class TestGenPyproject(unittest.TestCase):
         with scratch_dir("gp3") as tmp:
             req = Path(tmp) / "requirements.txt"
             req.write_text("pandas==2.2.2\nruff==0.4.4\npytest==8.2.0\n", encoding="utf-8")
-            runtime, dev = gen_pyproject.split_requirements(
-                gen_pyproject.read_requirements(req)
-            )
+            runtime, dev = gen_pyproject.split_requirements(gen_pyproject.read_requirements(req))
             text = gen_pyproject.render_pyproject(runtime, dev, version="9.9.9")
             out = Path(tmp) / "pyproject.toml"
             out.write_text(text, encoding="utf-8")
@@ -163,9 +158,7 @@ class TestRealSubmodules(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        gitlinks = [
-            line for line in result.stdout.splitlines() if line.startswith("160000")
-        ]
+        gitlinks = [line for line in result.stdout.splitlines() if line.startswith("160000")]
         self.assertGreaterEqual(len(gitlinks), 2, result.stdout)
         for line in gitlinks:
             # mode, sha, stage, path

@@ -24,8 +24,9 @@ import io
 import json
 import re
 import tarfile
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any
 
 import zstandard
 
@@ -115,9 +116,7 @@ class PartWriter:
         if max_bytes <= 0:
             raise ValueError(f"max_bytes must be positive, got {max_bytes}")
         if max_bytes > FAT32_MAX_BYTES:
-            raise ValueError(
-                f"max_bytes {max_bytes} exceeds the FAT32 cap {FAT32_MAX_BYTES}"
-            )
+            raise ValueError(f"max_bytes {max_bytes} exceeds the FAT32 cap {FAT32_MAX_BYTES}")
         self.directory = Path(directory)
         self.column = _check_identifier(column, "column name")
         self.max_bytes = max_bytes
@@ -187,7 +186,7 @@ class PartWriter:
             self._flush()
             self._closed = True
 
-    def __enter__(self) -> "PartWriter":
+    def __enter__(self) -> PartWriter:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -222,11 +221,7 @@ def _encode_rows(values: Sequence[Any]) -> bytes:
 def _decode_rows(raw: bytes) -> list[Any]:
     if not raw:
         return []
-    return [
-        json.loads(line)
-        for line in raw.decode("utf-8").split("\n")
-        if line.strip()
-    ]
+    return [json.loads(line) for line in raw.decode("utf-8").split("\n") if line.strip()]
 
 
 def write_table(
@@ -284,7 +279,9 @@ def write_table(
     return archive_path
 
 
-def read_table(archive: str | Path, dest: str | Path, table: str | None = None) -> dict[str, list[Any]]:
+def read_table(
+    archive: str | Path, dest: str | Path, table: str | None = None
+) -> dict[str, list[Any]]:
     """Read a table written by :func:`write_table` back into memory.
 
     ``dest`` receives the extracted ``<table>/`` tree. When ``table`` is None
@@ -301,9 +298,7 @@ def read_table(archive: str | Path, dest: str | Path, table: str | None = None) 
             if not roots:
                 return {}
             if len(roots) > 1:
-                raise ValueError(
-                    f"archive contains multiple tables {sorted(roots)}; specify one"
-                )
+                raise ValueError(f"archive contains multiple tables {sorted(roots)}; specify one")
             table = roots.pop()
         _check_identifier(table, "table name")
         # Create directories explicitly before extraction so they inherit a

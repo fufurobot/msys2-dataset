@@ -7,21 +7,19 @@ import tarfile
 import unittest
 from pathlib import Path
 
-from tests.helpers import scratch_dir
-
 import zstandard
-
-
 from msys2_dataset.io import (
     compress_file_zstd,
     decompress_file_zstd,
     pack_tar_zstd,
-    unpack_tar_zstd,
     read_csv,
     read_jsonl,
+    unpack_tar_zstd,
     write_csv,
     write_jsonl,
 )
+
+from tests.helpers import scratch_dir
 
 
 class TestCsvRoundtrip(unittest.TestCase):
@@ -49,9 +47,7 @@ class TestCsvRoundtrip(unittest.TestCase):
         with scratch_dir("c4") as tmp:
             path = Path(tmp) / "t.csv"
             write_csv(path, [{"a": "1", "b": "2"}, {"a": "3", "b": "4"}])
-            self.assertEqual(
-                read_csv(path), [{"a": "1", "b": "2"}, {"a": "3", "b": "4"}]
-            )
+            self.assertEqual(read_csv(path), [{"a": "1", "b": "2"}, {"a": "3", "b": "4"}])
 
     def test_empty_rows_writes_header_only(self) -> None:
         with scratch_dir("c5") as tmp:
@@ -164,9 +160,7 @@ class TestTarZstdHelpers(unittest.TestCase):
             pack_tar_zstd(root, archive)
             # Must be a zstd frame, not a bare tar.
             self.assertEqual(archive.read_bytes()[:4], b"\x28\xb5\x2f\xfd")
-            raw = zstandard.ZstdDecompressor().stream_reader(
-                archive.open("rb")
-            ).read()
+            raw = zstandard.ZstdDecompressor().stream_reader(archive.open("rb")).read()
             self.assertEqual(len(raw) % 512, 0)
             with tarfile.open(fileobj=__import__("io").BytesIO(raw)) as tf:
                 self.assertIn("a.txt", tf.getnames())

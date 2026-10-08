@@ -82,13 +82,9 @@ def render_pyproject(
     dev_deps = "\n".join(f'        "{d}",' for d in dev)
     build = "\n".join(f'    "{b}",' for b in BUILD_REQUIRES)
 
-    dev_section = (
-        f"\n[project.optional-dependencies]\ndev = [\n{dev_deps}\n]\n"
-        if dev
-        else ""
-    )
+    dev_section = f"\n[project.optional-dependencies]\ndev = [\n{dev_deps}\n]\n" if dev else ""
 
-    return f'''# GENERATED FILE — DO NOT EDIT.
+    return f"""# GENERATED FILE — DO NOT EDIT.
 # Produced by tools/gen_pyproject.py from requirements.txt, which is the
 # authoritative dependency source. This file is gitignored on purpose.
 [project]
@@ -126,7 +122,18 @@ exclude = [
     "dist/**",
     ".git/**",
 ]
-'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+"""
 
 
 def main(argv: list[str] | None = None) -> int:

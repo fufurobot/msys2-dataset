@@ -40,9 +40,7 @@ GITMODULES = REPO_ROOT / ".gitmodules"
 
 
 def _run(args: list[str], cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        args, cwd=str(cwd), capture_output=True, text=True, check=False
-    )
+    return subprocess.run(args, cwd=str(cwd), capture_output=True, text=True, check=False)
 
 
 def _gitmodules_text(specs: list[SubmoduleSpec]) -> str:
@@ -108,9 +106,7 @@ def sync(specs: list[SubmoduleSpec], check: bool) -> int:
 
     if check:
         print(
-            "submodule plan is in sync"
-            if problems == 0
-            else f"{problems} problem(s) found",
+            "submodule plan is in sync" if problems == 0 else f"{problems} problem(s) found",
         )
         return 1 if problems else 0
 

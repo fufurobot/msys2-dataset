@@ -67,9 +67,7 @@ def _cmd_pack(args: argparse.Namespace) -> int:
         "mingw_name": [p.mingw.name if p.mingw else None for p in pairs],
         "paired": [p.paired for p in pairs],
     }
-    archive = write_table(
-        args.output, args.table, table, max_part_bytes=args.max_part_bytes
-    )
+    archive = write_table(args.output, args.table, table, max_part_bytes=args.max_part_bytes)
     print(f"wrote {archive} ({archive.stat().st_size} bytes)")
     return 0
 
@@ -98,9 +96,7 @@ def _cmd_info(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="msys2-dataset", description=__doc__.splitlines()[0]
-    )
+    parser = argparse.ArgumentParser(prog="msys2-dataset", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
     pair = sub.add_parser("pair", help="pair msys2 and mingw package listings")
@@ -122,12 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pack.set_defaults(func=_cmd_pack)
 
-    submodules = sub.add_parser(
-        "submodules", help="report drift against repo-list.txt"
-    )
-    submodules.add_argument(
-        "--repo-list", type=Path, default=DATA / "repo" / "repo-list.txt"
-    )
+    submodules = sub.add_parser("submodules", help="report drift against repo-list.txt")
+    submodules.add_argument("--repo-list", type=Path, default=DATA / "repo" / "repo-list.txt")
     submodules.set_defaults(func=_cmd_submodules)
 
     info = sub.add_parser("info", help="describe storage constraints")

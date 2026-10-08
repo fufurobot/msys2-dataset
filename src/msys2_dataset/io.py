@@ -11,8 +11,9 @@ import csv
 import io
 import json
 import tarfile
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any
 
 import zstandard
 

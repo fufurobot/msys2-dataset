@@ -7,19 +7,18 @@ SQLite for fast writes. These tests pin the SQLite side of that contract.
 from __future__ import annotations
 
 import sqlite3
-
-from tests.helpers import scratch_dir
 import unittest
 from pathlib import Path
-
 
 from msys2_dataset.sqlite_store import (
     load_rows,
     open_db,
     query_rows,
-    write_rows,
     table_names,
+    write_rows,
 )
+
+from tests.helpers import scratch_dir
 
 
 class TestWriteRows(unittest.TestCase):
@@ -57,7 +56,7 @@ class TestWriteRows(unittest.TestCase):
         with scratch_dir("c5") as tmp:
             db = Path(tmp) / "t.sqlite"
             write_rows(db, "pkg", [{"a": 1}])
-            with self.assertRaises(Exception):
+            with self.assertRaises(ValueError):
                 write_rows(db, "pkg", [{"a": 2}], if_exists="fail")
 
     def test_invalid_if_exists_raises(self) -> None:
