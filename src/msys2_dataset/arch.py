@@ -15,6 +15,23 @@ Three sources, all public and unauthenticated:
 
 Only the standard library is used, so the scraper has no import-time
 dependencies beyond what ``requirements.txt`` already pins.
+
+Status — what is and is not collected
+-------------------------------------
+
+======================  ========  ==========================================
+source                  status    notes
+======================  ========  ==========================================
+``core``                complete  299 packages
+``extra``               complete  15,025 packages
+``AUR``                 PARTIAL   ~14,200 of ~121,445 before throttling
+======================  ========  ==========================================
+
+TODO(aur-full-crawl): the AUR sweep is incomplete. The AUR began refusing
+connections partway through (a fixed 10s connect timeout in the HTTP client)
+and then throttled the host. ``fetch_aur_bulk`` documents the plan for
+finishing it in resumable chunks. The committed dataset holds core + extra
+only; README.md carries the same status.
 """
 
 from __future__ import annotations
@@ -24,7 +41,9 @@ import io
 import json
 import re
 import subprocess
+import sys
 import tarfile
+import time
 import urllib.parse
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field
@@ -119,13 +138,22 @@ def dependency_name(spec: str) -> str:
     return _DEP_SPLIT.match(spec.strip()).group(1).strip().lower()  # type: ignore[union-attr]
 
 
-def _request(url: str, timeout: int = 60, mirrors: Sequence[str] | None = None) -> bytes:
-    """Fetch ``url``, with optional mirror fallbacks.
+def _request(
+    url: str,
+    timeout: int = 60,
+    mirrors: Sequence[str] | None = None,
+    method: str = "GET",
+    form: dict[str, Any] | None = None,
+) -> bytes:
+    """Fetch ``url``, with optional mirror fallbacks and form-encoded POST.
 
     Network access is delegated to ``tools/fetch.js``: Python's `urllib` cannot
     open sockets to the Arch hosts in some confined environments (it fails with
     ``[Errno 2] No such file or directory``), while Node's TLS stack can. The
     retry/mirror-rotation logic lives there too, so this stays a thin call.
+
+    POST is used for the AUR RPC because a GET query string with hundreds of
+    repeated ``arg[]`` parameters is rejected as too long.
     """
     if mirrors:
         urls = list(mirrors) + [url]
@@ -136,11 +164,14 @@ def _request(url: str, timeout: int = 60, mirrors: Sequence[str] | None = None) 
     # (including the DSH sandbox), so stage the response inside the repository.
     staging = _REPO_ROOT / ".fetch-cache"
     staging.mkdir(parents=True, exist_ok=True)
-    out = staging / f"body-{abs(hash(url)) & 0xFFFFFFFF:08x}.bin"
+    out = staging / f"body-{abs(hash((url, method))) & 0xFFFFFFFF:08x}.bin"
     try:
-        payload = json.dumps({"urls": urls, "out": str(out), "timeout_ms": timeout * 1000})
+        payload: dict[str, Any] = {"urls": urls, "out": str(out), "timeout_ms": timeout * 1000}
+        if method.upper() == "POST":
+            payload["method"] = "POST"
+            payload["form"] = form or {}
         result = subprocess.run(
-            ["node", str(_FETCH_SCRIPT), payload],
+            ["node", str(_FETCH_SCRIPT), json.dumps(payload)],
             capture_output=True,
             text=True,
             check=False,
@@ -334,20 +365,48 @@ def fetch_aur_listing() -> list[ArchPackage]:
     return parse_aur_packages_gz(_request(AUR_PACKAGES_URL, timeout=120))
 
 
-def fetch_aur_info(names: Sequence[str], batch: int = 200) -> list[ArchPackage]:
+def fetch_aur_info(
+    names: Sequence[str],
+    batch: int = 100,
+    on_error: str = "skip",
+    pause: float = 0.25,
+) -> list[ArchPackage]:
     """Query the AUR RPC for specific package names, in batches.
 
-    Returns full metadata (dependencies, votes, maintainer) for a bounded set.
-    An empty ``names`` list performs no request.
+    Uses POST rather than GET: with 100+ names a GET query string runs to
+    several kilobytes, which the AUR rejects. Returns full metadata
+    (dependencies, votes, maintainer). An empty ``names`` list makes no request.
+
+    ``pause`` sleeps briefly between batches. The AUR throttles sustained
+    request rates, and without this a long sweep starts failing to connect
+    partway through.
+
+    ``on_error`` controls what happens when a batch fails after retries:
+    ``skip`` (default) logs and continues, so one bad batch cannot lose an
+    entire sweep; ``raise`` propagates.
     """
     if not names:
         return []
 
     results: list[ArchPackage] = []
     for start in range(0, len(names), batch):
-        chunk = names[start : start + batch]
-        query = "&".join(f"arg[]={urllib.parse.quote(n)}" for n in chunk)
-        payload = json.loads(_request(f"{AUR_RPC_URL}?{query}").decode("utf-8"))
+        chunk = list(names[start : start + batch])
+        if start and pause:
+            time.sleep(pause)
+        try:
+            payload = json.loads(
+                _request(AUR_RPC_URL, method="POST", form={"arg[]": chunk}, timeout=120).decode(
+                    "utf-8"
+                )
+            )
+        except OSError as exc:
+            if on_error == "raise":
+                raise
+            print(
+                f"    warning: skipping {len(chunk)} names at offset {start}: {exc}",
+                file=sys.stderr,
+            )
+            continue
         results.extend(parse_aur_rpc(payload))
     return results
 
@@ -381,9 +440,10 @@ def fetch_aur_search(
 
 def fetch_aur_bulk(
     names: Sequence[str] | None = None,
-    batch: int = 200,
+    batch: int = 100,
     limit: int | None = None,
     progress: bool = False,
+    pause: float = 0.25,
 ) -> list[ArchPackage]:
     """Fetch AUR metadata for many packages by name, in batched RPC calls.
 
@@ -392,9 +452,23 @@ def fetch_aur_bulk(
     the name list from ``packages.gz`` fed through the batched ``info``
     endpoint, which is what this does.
 
-    ``limit`` caps how many names are queried, which is the only way to keep a
-    full AUR sweep to a sensible duration (the namespace is well over 100k
-    packages, at roughly 200 names per request).
+    ``limit`` caps how many names are queried. The namespace is ~121k packages,
+    so an unbounded sweep is ~1200 requests and takes well over 20 minutes.
+
+    TODO(aur-full-crawl): the full 121k-package AUR sweep has NOT been
+        completed. A run reached ~14,200 packages before the AUR began
+        refusing connections (undici's fixed 10s connect timeout), and the
+        host then throttled this IP for a sustained period. To finish it:
+
+          * crawl in resumable chunks with ``--aur-pages``/``limit`` and
+            checkpoint the partial result, rather than one long request loop;
+          * raise the connect timeout (undici ships no standalone ``Agent``
+            here, so this likely means a different HTTP client or a custom
+            dispatcher bundled with the tooling);
+          * back off harder on connect failures and resume from the last
+            successful offset instead of restarting.
+        The committed data currently contains core + extra only; see the
+        status table in README.md.
     """
     if names is None:
         names = fetch_aur_names()
@@ -403,7 +477,7 @@ def fetch_aur_bulk(
     packages: list[ArchPackage] = []
     for start in range(0, len(selected), batch):
         chunk = selected[start : start + batch]
-        packages.extend(fetch_aur_info(chunk, batch=batch))
+        packages.extend(fetch_aur_info(chunk, batch=batch, pause=pause))
         if progress and (start // batch) % 10 == 0:
             print(f"    aur {len(packages)}/{len(selected)}", flush=True)
     return packages

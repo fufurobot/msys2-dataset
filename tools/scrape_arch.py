@@ -14,8 +14,13 @@ Usage::
 
     python tools/scrape_arch.py                     # core + extra + AUR
     python tools/scrape_arch.py --no-aur            # official repos only
-    python tools/scrape_arch.py --aur-pages 5       # bounded AUR sample
+    python tools/scrape_arch.py --aur-limit 10000   # bounded AUR sample
     python tools/scrape_arch.py --reuse             # match from cached JSONL
+
+Status: ``core`` and ``extra`` are fully scraped. The **AUR sweep is NOT
+complete** — a run reached ~14,200 of ~121,445 packages before the AUR stopped
+accepting connections and throttled this host. TODO(aur-full-crawl): finish it
+in bounded, resumable runs; see ``msys2_dataset.arch.fetch_aur_bulk``.
 """
 
 from __future__ import annotations
@@ -94,6 +99,16 @@ def main(argv: list[str] | None = None) -> int:
         help="limit AUR RPC pages (100 packages each); default is the full set",
     )
     parser.add_argument(
+        "--aur-limit",
+        type=int,
+        default=None,
+        help=(
+            "limit how many AUR names are queried. The full namespace is ~121k "
+            "packages and takes well over 20 minutes; the AUR throttles "
+            "sustained rates, so prefer bounded, resumable runs."
+        ),
+    )
+    parser.add_argument(
         "--reuse",
         action="store_true",
         help="skip scraping and reuse the cached data/arch-pkgs.jsonl[.zst]",
@@ -116,11 +131,16 @@ def main(argv: list[str] | None = None) -> int:
         arch = load_arch_jsonl(cached)
     else:
         print("scraping arch linux...")
+        # --aur-limit wins over --aur-pages; both bound the AUR sweep because
+        # the full namespace is large and the AUR throttles sustained rates.
+        limit = args.aur_limit
+        if limit is None and args.aur_pages is not None:
+            limit = args.aur_pages * 100
         arch = scrape(
             repos=args.repos,
             mirror=args.mirror,
             include_aur=not args.no_aur,
-            aur_limit=None if args.aur_pages is None else args.aur_pages * 100,
+            aur_limit=limit,
         )
         write_arch_jsonl(arch, args.out)
         packed = _write_compressed(args.out, level=args.level)

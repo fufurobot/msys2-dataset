@@ -43,16 +43,25 @@ the genuinely divergent names (Arch `freetype2` ↔ MSYS2 `freetype`).
 
 ## Current figures
 
-| ecosystem | packages | source |
-| --- | --- | --- |
-| Arch `core` | 299 | `core.db` |
-| Arch `extra` | 15,025 | `extra.db` |
-| AUR | *see below* | AUR RPC |
-| MSYS2 | 608 | `data/msys2-pkgs.tsv` |
-| MINGW | 3,361 | `data/mingw-pkgs.tsv` |
+### Scrape status
 
-Official-repositories-only matching (AUR added separately, since its metadata
-call is far more expensive):
+| source | status | packages | notes |
+| --- | --- | --- | --- |
+| Arch `core` | ✅ complete | 299 | `core.db` |
+| Arch `extra` | ✅ complete | 15,025 | `extra.db` |
+| AUR | ⚠️ **partial** | ~14,200 / 121,445 | stopped by upstream throttling |
+| MSYS2 | ✅ complete | 608 | `data/msys2-pkgs.tsv` |
+| MINGW | ✅ complete | 3,361 | `data/mingw-pkgs.tsv` |
+
+> **TODO(aur-full-crawl)** — the AUR sweep is **not** finished. A run reached
+> ~14,200 packages before the AUR stopped accepting connections (the HTTP
+> client's connect timeout is fixed at 10s) and then throttled this host for a
+> sustained period. To complete it, crawl in bounded resumable chunks rather
+> than one long loop; `msys2_dataset.arch.fetch_aur_bulk` documents the plan.
+> The committed dataset contains **core + extra only**, so every figure below
+> excludes the AUR.
+
+### Matching results (core + extra)
 
 | metric | value |
 | --- | --- |
@@ -82,11 +91,14 @@ cd msys2-dataset
 python tools/gen_pyproject.py   # pyproject.toml is gitignored
 uv sync
 
-python tools/scrape_arch.py             # core + extra + full AUR
-python tools/scrape_arch.py --no-aur    # official repos only (fast)
-python tools/scrape_arch.py --aur-pages 5   # bounded AUR sample
-python tools/scrape_arch.py --reuse     # re-match from the cached scrape
+python tools/scrape_arch.py --no-aur       # official repos only (fast, complete)
+python tools/scrape_arch.py --aur-limit 10000   # bounded AUR sample
+python tools/scrape_arch.py --reuse        # re-match from the cached scrape
 ```
+
+> A full AUR run (`python tools/scrape_arch.py`) is ~1200 requests and takes
+> well over 20 minutes. It is currently incomplete — see the status table above.
+> Prefer bounded `--aur-limit` runs and re-run with `--reuse` to re-match.
 
 The scrape writes:
 

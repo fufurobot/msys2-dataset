@@ -24,17 +24,34 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchWithRetry(urls, timeoutMs) {
+async function fetchWithRetry(urls, timeoutMs, options) {
   const errors = [];
   for (const url of urls) {
     for (let attempt = 0; attempt < RETRIES_PER_URL; attempt += 1) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await fetch(url, {
-          headers: { 'User-Agent': 'msys2-dataset/0.1 (+https://github.com/fufurobot/msys2-dataset)' },
+        const init = {
+          method: options.method || 'GET',
+          headers: {
+            'User-Agent': 'msys2-dataset/0.1 (+https://github.com/fufurobot/msys2-dataset)',
+          },
           signal: controller.signal,
-        });
+        };
+        if (init.method === 'POST') {
+          // The AUR RPC takes repeated `arg[]` fields; a GET query string with
+          // hundreds of them is rejected as too long.
+          const body = new URLSearchParams();
+          for (const [key, value] of Object.entries(options.form || {})) {
+            if (Array.isArray(value)) {
+              for (const item of value) body.append(key, item);
+            } else {
+              body.append(key, value);
+            }
+          }
+          init.body = body;
+        }
+        const response = await fetch(url, init);
         clearTimeout(timer);
         if (!response.ok) {
           errors.push(`${url} -> HTTP ${response.status}`);
@@ -55,9 +72,9 @@ async function fetchWithRetry(urls, timeoutMs) {
 
 async function main() {
   const request = JSON.parse(process.argv[2]);
-  const { urls, out, timeout_ms: timeoutMs = 120000 } = request;
+  const { urls, out, timeout_ms: timeoutMs = 120000, method = 'GET', form = {} } = request;
   if (!Array.isArray(urls) || urls.length === 0) throw new Error('urls must be a non-empty array');
-  const { url, buffer } = await fetchWithRetry(urls, timeoutMs);
+  const { url, buffer } = await fetchWithRetry(urls, timeoutMs, { method, form });
   fs.writeFileSync(out, buffer);
   process.stderr.write(`fetched ${buffer.length} bytes from ${url}\n`);
 }
