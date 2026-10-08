@@ -221,3 +221,9 @@ __marimo__/
 pyproject.toml
 uv.lock
 .python-version
+
+# Test scratch space (DSH sandbox requires workspace-local temp dirs)
+.pytest-scratch/
+.pytest-scratch-old-*/
+pytest-cache-files-*/
+.uv-cache/
