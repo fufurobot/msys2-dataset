@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Keep going on the other interpreters so one failure does not hide the rest.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Unit tests use checked-in fixtures; the data/ submodules are not needed.
+          submodules: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # `uv python install` shims the requested interpreter onto PATH; assert it
+      # so a silent fallback to the runner's default Python cannot slip through.
+      - name: Verify interpreter
+        run: python --version
+
+      # pyproject.toml is gitignored, so the runner regenerates it with the
+      # same tool that local dev and Codespaces use. That keeps a single
+      # definition of the dependency set instead of duplicating it per runner.
+      - name: Generate pyproject.toml from requirements.txt
+        run: python tools/gen_pyproject.py
+
+      - name: Install package and test dependencies
+        env:
+          # Build isolation is disabled so the build backend resolves in the
+          # target interpreter rather than a throwaway venv.
+          UV_NO_BUILD_ISOLATION: "1"
+        run: |
+          uv pip install --system .
+          uv pip install --system pytest
+
+      - name: Run tests
+        env:
+          # Keep the src-layout importable even if the install step is skipped.
+          PYTHONPATH: src
+        run: python -m pytest tests -q

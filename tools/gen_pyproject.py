@@ -113,6 +113,19 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/msys2_dataset"]
+
+[tool.hatch.build.targets.sdist]
+# The submodule trees under data/ hold thousands of upstream package files and
+# must never be packed into a distribution; neither should local caches.
+exclude = [
+    "data/repo/**",
+    "data/**",
+    ".uv-cache/**",
+    ".pytest-scratch/**",
+    ".venv/**",
+    "dist/**",
+    ".git/**",
+]
 '''
 
 

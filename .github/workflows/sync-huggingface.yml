@@ -1,0 +1,61 @@
+name: Sync to HuggingFace Hub
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Push dataset to the Hub
+    runs-on: ubuntu-latest
+    permissions:
+      # id-token lets the hf CLI request a short-lived OIDC token instead of a
+      # long-lived secret (HF_OIDC_RESOURCE names the target resource).
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # data/repo holds real git submodules and datalad needs full history.
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install HuggingFace CLI
+        run: |
+          curl -LsSf https://hf.co/cli/install.sh | bash
+          # The installer drops the binary in ~/.local/bin; expose it to later steps.
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify HuggingFace CLI
+        run: hf version
+
+      - name: Install DataLad and git-annex
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-annex
+          pip install datalad
+
+      # Best-effort: only a DataLad/git-annex dataset has content to fetch, and a
+      # plain checkout must not hard-fail here. Failures are surfaced loudly but
+      # tolerated so the upload step can still push whatever is present.
+      - name: Fetch annexed content (best effort)
+        run: |
+          if [ -f .gitattributes ] && grep -q "annex" .gitattributes; then
+            datalad get . || echo "::warning::datalad get failed; uploading files already present"
+          else
+            echo "No annex metadata found; skipping datalad get."
+          fi
+
+      - name: Upload dataset to HuggingFace Hub
+        env:
+          # Requested OIDC resource for trusted publishing to the dataset repo.
+          HF_OIDC_RESOURCE: fufurobot/msys2-dataset
+          # Optional fallback when OIDC is unavailable.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          hf upload fufurobot/msys2-dataset ./data . \
+            --repo-type dataset \
+            --commit-message "Sync from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"

@@ -1,0 +1,81 @@
+name: Publish to TestPyPI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      # pyproject.toml is gitignored, so it is regenerated here with the same
+      # tool used locally and by the test workflow. The version is taken from
+      # the tag when building a release, otherwise the default applies.
+      - name: Generate pyproject.toml from requirements.txt
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
+        run: |
+          # Strip a leading "v" so tag v1.2.3 becomes version 1.2.3.
+          python tools/gen_pyproject.py --version "${VERSION#v}"
+
+      - name: Show generated metadata
+        run: head -n 20 pyproject.toml
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Show built artifacts
+        run: ls -l dist
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Token-based publishing, so no OIDC/id-token permission is required.
+    permissions:
+      contents: read
+    # Never publish from a pull_request; only pushes and manual dispatches.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish package to TestPyPI
+        # The secret cannot be inspected in an `if:` expression, so skip cleanly
+        # when it is not configured (e.g. on forks) instead of failing the run.
+        env:
+          TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        if: env.TEST_PYPI_API_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          verbose: true
+          print-hash: true
