@@ -27,7 +27,7 @@ class TestGenPyproject(unittest.TestCase):
         with scratch_dir("gp1") as tmp:
             req = Path(tmp) / "requirements.txt"
             req.write_text(
-                "# a comment\n" "pandas==2.2.2\n" "\n" "numpy==1.26.4  # inline comment\n",
+                "# a comment\npandas==2.2.2\n\nnumpy==1.26.4  # inline comment\n",
                 encoding="utf-8",
             )
             self.assertEqual(
@@ -99,6 +99,32 @@ class TestGenPyproject(unittest.TestCase):
             0,
             "pyproject.toml is stale; run python tools/gen_pyproject.py",
         )
+
+    def test_tooling_versions_are_pinned_exactly(self) -> None:
+        """Lint/format results must not drift between local dev and CI.
+
+        CI installs whatever requirements.txt pins. If ruff were unpinned, a
+        developer's older ruff and CI's newer one can disagree about
+        formatting, so the exact pin is load-bearing.
+        """
+        requirements = gen_pyproject.read_requirements()
+        by_name = {gen_pyproject._requirement_key(r): r for r in requirements}
+        for tool in ("ruff", "pytest"):
+            with self.subTest(tool=tool):
+                self.assertIn(tool, by_name, f"{tool} must be listed")
+                self.assertIn(
+                    "==",
+                    by_name[tool],
+                    f"{tool} must be pinned with '==' so local and CI agree",
+                )
+
+    def test_dev_dependencies_are_not_runtime_dependencies(self) -> None:
+        """Lint/test tools must not leak into the published runtime set."""
+        runtime, dev = gen_pyproject.split_requirements(gen_pyproject.read_requirements())
+        runtime_names = {gen_pyproject._requirement_key(r) for r in runtime}
+        dev_names = {gen_pyproject._requirement_key(r) for r in dev}
+        self.assertFalse(runtime_names & {"ruff", "pytest"})
+        self.assertEqual(dev_names, {"ruff", "pytest"})
 
 
 class TestSyncSubmodules(unittest.TestCase):
