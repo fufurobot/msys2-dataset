@@ -162,8 +162,34 @@ class TestSyncSubmodules(unittest.TestCase):
             self.assertIn("submodule.data/repo/MINGW-packages.path", result.stdout)
 
     def test_real_repo_is_in_sync(self) -> None:
+        """Registration (.gitmodules + gitlinks) must match repo-list.txt.
+
+        This deliberately does not require submodules to be checked out: CI
+        uses `submodules: false`, and the registration is verifiable from the
+        index alone.
+        """
         rc = sync_submodules.main(["--check"])
         self.assertEqual(rc, 0, "submodules drift from repo-list.txt")
+
+    def test_unregistered_submodule_is_reported_as_drift(self) -> None:
+        """A missing .gitmodules/gitlink must count as drift, not as silence."""
+        from msys2_dataset.repolist import RepoEntry, build_submodule_plan
+
+        specs = build_submodule_plan(
+            [RepoEntry(url="https://github.com/msys2/msys2-packages.git", name="msys2-packages")]
+        )
+        with scratch_dir("ss2") as tmp:
+            root = Path(tmp)
+            original_root = sync_submodules.REPO_ROOT
+            original_modules = sync_submodules.GITMODULES
+            try:
+                sync_submodules.REPO_ROOT = root
+                sync_submodules.GITMODULES = root / ".gitmodules"
+                rc = sync_submodules.sync(specs, check=True)
+            finally:
+                sync_submodules.REPO_ROOT = original_root
+                sync_submodules.GITMODULES = original_modules
+            self.assertEqual(rc, 1, "an unregistered submodule must be drift")
 
 
 class TestRealSubmodules(unittest.TestCase):

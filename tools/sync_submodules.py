@@ -63,17 +63,31 @@ def _current_commit(path: Path) -> str | None:
 
 
 def _indexed_commit(spec_path: str) -> str | None:
+    """The commit the *index* pins for ``spec_path`` (mode 160000), if any."""
     result = _run(["git", "ls-files", "-s", "--", spec_path])
     if result.returncode != 0 or not result.stdout.strip():
         return None
-    return result.stdout.split()[1]
+    fields = result.stdout.split()
+    if len(fields) < 2 or fields[0] != "160000":
+        return None
+    return fields[1]
 
 
 def sync(specs: list[SubmoduleSpec], check: bool) -> int:
-    problems = 0
+    """Register ``specs`` as submodules, or verify the registration.
 
+    In check mode the invariant is that ``.gitmodules`` and the mode-160000
+    gitlinks agree with ``repo-list.txt``. Whether each submodule is actually
+    checked out in the working tree is deliberately *not* a failure: a CI job
+    may legitimately use ``submodules: false`` when it only needs the
+    registration, and reporting that as drift would make the check useless
+    there.
+    """
+    problems = 0
+    missing_checkouts: list[SubmoduleSpec] = []
+
+    expected = _gitmodules_text(specs)
     if check:
-        expected = _gitmodules_text(specs)
         actual = GITMODULES.read_text(encoding="utf-8") if GITMODULES.exists() else ""
         if expected != actual:
             print("DRIFT: .gitmodules does not match repo-list.txt", file=sys.stderr)
@@ -81,10 +95,19 @@ def sync(specs: list[SubmoduleSpec], check: bool) -> int:
 
     for spec in specs:
         path = REPO_ROOT / spec.path
-        if not (path / ".git").exists():
+        checked_out = (path / ".git").exists()
+
+        if not checked_out:
+            missing_checkouts.append(spec)
             if check:
-                print(f"DRIFT: {spec.path} is not a checkout", file=sys.stderr)
-                problems += 1
+                # Registration is still verifiable from the index alone.
+                if _indexed_commit(spec.path) is None:
+                    print(
+                        f"DRIFT: {spec.path} is not registered as a submodule "
+                        f"(no mode-160000 gitlink)",
+                        file=sys.stderr,
+                    )
+                    problems += 1
                 continue
             print(f"cloning {spec.url} -> {spec.path}")
             result = _run(["git", "clone", "--depth", "1", spec.url, spec.path])
@@ -105,12 +128,15 @@ def sync(specs: list[SubmoduleSpec], check: bool) -> int:
             _run(["git", "add", "--", spec.path])
 
     if check:
+        if missing_checkouts:
+            names = ", ".join(s.path for s in missing_checkouts)
+            print(f"note: not checked out in this working tree: {names}")
         print(
             "submodule plan is in sync" if problems == 0 else f"{problems} problem(s) found",
         )
         return 1 if problems else 0
 
-    GITMODULES.write_text(_gitmodules_text(specs), encoding="utf-8")
+    GITMODULES.write_text(expected, encoding="utf-8")
     _run(["git", "add", "--", ".gitmodules"])
     for spec in specs:
         commit = _current_commit(REPO_ROOT / spec.path)
