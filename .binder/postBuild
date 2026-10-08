@@ -1,0 +1,44 @@
+#!/bin/bash
+# Binder post-build.
+#
+# Binder builds from `environment.yml` (which already pulls git-annex from
+# conda-forge); this script only makes the dataset usable and warms the
+# notebook environment. Every step is idempotent and non-fatal so a Binder
+# build never fails on an already-satisfied precondition.
+set -e
+
+echo "==> Binder post-build starting"
+
+# git-annex is the system dependency DataLad needs for data retrieval.
+if ! command -v git-annex >/dev/null 2>&1; then
+    echo "==> installing git-annex via apt"
+    (apt-get update && apt-get install -y git-annex) || \
+        echo "!! apt install git-annex failed; relying on conda-provided git-annex"
+else
+    echo "==> git-annex already present"
+fi
+
+# Install the package itself so `import msys2_dataset` works in notebooks.
+python -m pip install --no-cache-dir -e . 2>/dev/null || \
+    python -m pip install --no-cache-dir -e . --no-build-isolation || \
+    echo "!! editable install skipped; notebooks can still use PYTHONPATH=src"
+
+# The repository is a DataLad dataset. Initialise the annex if this checkout
+# does not have one yet, then fetch any annexed content that is available.
+if [ ! -d .git/annex ]; then
+    echo "==> initialising DataLad dataset"
+    datalad create -f --dataset . || true
+else
+    echo "==> git-annex already initialised"
+fi
+
+echo "==> fetching annexed data (best effort)"
+datalad get . || echo "!! some annexed content could not be fetched (no remote?)"
+
+# Keep the submodule-based package repos in sync with repo-list.txt.
+if command -v python >/dev/null 2>&1 && [ -f tools/sync_submodules.py ]; then
+    python tools/sync_submodules.py --check || \
+        echo "!! submodule drift detected; run tools/sync_submodules.py to fix"
+fi
+
+echo "==> Binder post-build complete"

@@ -1,0 +1,8 @@
+[submodule "data/repo/msys2-packages"]
+	path = data/repo/msys2-packages
+	url = https://github.com/msys2/msys2-packages.git
+	shallow = true
+[submodule "data/repo/MINGW-packages"]
+	path = data/repo/MINGW-packages
+	url = https://github.com/msys2/MINGW-packages.git
+	shallow = true

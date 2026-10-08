@@ -1,0 +1,2 @@
+https://github.com/msys2/msys2-packages.git
+https://github.com/msys2/MINGW-packages.git
