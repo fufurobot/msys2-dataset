@@ -10,194 +10,271 @@
 
 # msys2-dataset
 
-Pair **MSYS2** and **MINGW** package metadata to answer a practical question:
-*which MSYS2 package corresponds to which MINGW package?*
+Match **Arch Linux** (`core`, `extra`, `AUR`) packages against **MSYS2** and
+**MINGW** packages, to answer a practical question:
 
-The two upstream repositories are checked out as real git submodules, their
-package directories are parsed, and the two sets are joined on a normalised
-name (`mingw-w64-ucrt-x86_64-zlib` → `zlib` → the MSYS2 `zlib` package).
+> This project exists on Arch as `foo`. Does MSYS2 ship it? Does MINGW? Under
+> what name?
 
-On the current snapshots:
+## Why Arch is the reference point
+
+MSYS2 and MINGW packages are **not** designed to correspond to each other. They
+are two different porting efforts of the same upstream software, packaged for
+different environments, and they do not track one another's names or versions.
+Pairing MSYS2 against MINGW directly is therefore meaningless — it produces
+coincidences, not correspondences.
+
+**Arch Linux is the neutral reference.** It packages a very large slice of the
+same upstream projects under close-to-upstream names, and it has stable,
+machine-readable metadata (exact versions, dependency lists, licenses). So the
+dataset joins all three ecosystems on the **normalised upstream project name**:
+
+```
+                 Arch: zlib 1:1.3.2-3        (core)
+                          │
+      normalise ──────────┼────────── normalise
+                          │
+   MSYS2: zlib      MINGW: mingw-w64-ucrt-x86_64-zlib
+```
+
+Normalisation strips the MINGW toolchain prefix
+(`mingw-w64-ucrt-x86_64-zlib` → `zlib`) and applies a curated alias table for
+the genuinely divergent names (Arch `freetype2` ↔ MSYS2 `freetype`).
+
+## Current figures
+
+| ecosystem | packages | source |
+| --- | --- | --- |
+| Arch `core` | 299 | `core.db` |
+| Arch `extra` | 15,025 | `extra.db` |
+| AUR | *see below* | AUR RPC |
+| MSYS2 | 608 | `data/msys2-pkgs.tsv` |
+| MINGW | 3,361 | `data/mingw-pkgs.tsv` |
+
+Official-repositories-only matching (AUR added separately, since its metadata
+call is far more expensive):
 
 | metric | value |
 | --- | --- |
-| MSYS2 packages | 608 |
-| MINGW packages | 3361 |
-| paired (`zlib` ↔ `mingw-w64-zlib`) | **304** |
-| MSYS2-only | 304 |
-| MINGW-only | 3057 |
+| distinct upstream projects | 16,472 |
+| Arch projects matched to MSYS2 and/or MINGW | **2,453** |
+| Arch-only (no MSYS2/MINGW equivalent) | 12,827 |
+| present in all three ecosystems | **281** |
+| Arch ↔ MSYS2 | 471 |
+| Arch ↔ MINGW | 2,263 |
 
-Exactly half of the MSYS2 package set has a MINGW counterpart; the MINGW
-repository is far larger because it builds each library for several
-toolchains (msvcrt, ucrt, clang, clangarm64).
+The asymmetry is the point: MSYS2/MINGW are **POSIX-on-Windows** toolchains, so
+they cover the portable core (compression, TLS, build tools, language runtimes)
+but not Arch's Linux-only surface (kernel modules, systemd units, GPU stacks).
+`all_three = 281` is the set of genuinely portable upstream projects.
 
----
+The live values are written to
+[`data/processed/ecosystem-summary.json`](data/processed/ecosystem-summary.json)
+by the scraper; treat the table above as a snapshot.
 
 ## Quick start
 
+### Reproduce the data
+
+```bash
+git clone --recurse-submodules https://github.com/fufurobot/msys2-dataset
+cd msys2-dataset
+python tools/gen_pyproject.py   # pyproject.toml is gitignored
+uv sync
+
+python tools/scrape_arch.py             # core + extra + full AUR
+python tools/scrape_arch.py --no-aur    # official repos only (fast)
+python tools/scrape_arch.py --aur-pages 5   # bounded AUR sample
+python tools/scrape_arch.py --reuse     # re-match from the cached scrape
+```
+
+The scrape writes:
+
+| file | contents |
+| --- | --- |
+| `data/arch-pkgs.jsonl.zst` | every scraped Arch/AUR package (zstd) |
+| `data/processed/ecosystem-matches.jsonl.zst` | one row per upstream project |
+| `data/processed/ecosystem-summary.json` | aggregate counts |
+
+Output is zstd-compressed because the raw JSONL is large: the core+extra scrape
+is 10.4 MB plain, **892 KB compressed (11.6×)**, and the match table is 3.4 MB
+plain, **152 KB compressed (22×)**.
+
+Query it directly:
+
+```python
+from msys2_dataset.arch import fetch_official_repo
+from msys2_dataset.matching import match_ecosystems, summarise_matches
+from msys2_dataset.packages import parse_ls_listing_file
+
+matches = match_ecosystems(
+    fetch_official_repo("core"),
+    parse_ls_listing_file("data/msys2-pkgs.tsv"),
+    parse_ls_listing_file("data/mingw-pkgs.tsv"),
+)
+summarise_matches(matches)
+```
+
 ### Binder
 
-Click the Binder badge. `environment.yml` provisions Python 3.11 and
-git-annex; `.binder/postBuild` initialises the DataLad dataset and fetches
-annexed content. The notebooks in `notebooks/` then run as-is.
+Click the Binder badge. `environment.yml` provisions Python 3.11 and git-annex;
+`.binder/postBuild` initialises the DataLad dataset and fetches annexed content.
 
 ### GitHub Codespaces
 
-Click the Codespaces badge. `.devcontainer/` installs uv and ruff, then
-`.devcontainer/postCreate.sh` regenerates `pyproject.toml`, runs `uv sync`,
-installs JupyterLab and initialises the submodules. Start a server with:
+Click the Codespaces badge. `.devcontainer/postCreate.sh` regenerates
+`pyproject.toml`, runs `uv sync`, installs JupyterLab and initialises the
+submodules. Then:
 
 ```bash
 uv run jupyter server --ip=0.0.0.0 --port=8888 --no-browser
 ```
 
-Codespaces forwards port 8888 automatically.
+## Notebooks
 
-### Local (uv)
+| notebook | shows |
+| --- | --- |
+| [`01_exploration.ipynb`](notebooks/01_exploration.ipynb) | parse both listings, pair and inspect overlap |
+| [`02_analysis.ipynb`](notebooks/02_analysis.ipynb) | persist matches to the columnar zstd tar and SQLite |
 
-```bash
-git clone --recurse-submodules https://github.com/fufurobot/msys2-dataset
-cd msys2-dataset
+Both are generated by `tools/make_notebooks.py` (so they stay valid nbformat with
+no stored outputs) and executed by `tools/run_notebooks.py`.
 
-python tools/gen_pyproject.py   # pyproject.toml is gitignored; regenerate it
-uv sync                         # or: pip install -r requirements.txt
+## Scraper design
 
-uv run python tools/run_notebooks.py   # execute both notebooks
-uv run python -m pytest tests -q
-```
+`src/msys2_dataset/arch.py` reads three public, unauthenticated sources:
 
----
+| source | format | why |
+| --- | --- | --- |
+| `core.db` / `extra.db` | gzipped tar of `<pkg>/desc` | one request yields every package, vs. walking the web UI |
+| `packages.gz` (AUR) | gzipped **name list** | enumerates the 121k-package AUR namespace |
+| AUR RPC `/rpc/v5/info` | JSON | the name list has no metadata; this supplies it, 200 names per call |
+
+Two things about the upstream formats are easy to get wrong, so both are pinned
+by tests:
+
+- `packages.gz` is **only a newline-separated list of names**, not the
+  pipe-delimited records its name suggests.
+- The AUR `search` endpoint rejects short terms and cannot enumerate the
+  namespace, so bulk collection goes through `info` by name.
+
+Network access is delegated to `tools/fetch.js`: Node's TLS stack reaches the
+Arch mirrors reliably from confined environments, while Python's `urllib` can
+fail per-host. Mirror rotation and retries live there.
 
 ## Data
 
 ### Submodules (`data/repo/`)
 
-`data/repo/repo-list.txt` is the single source of truth for which upstream
-repositories this dataset is built from. `data/repo/` is **not** a plain
-directory: each entry is a registered git submodule pinned to a commit, so a
-fresh clone reproduces the exact upstream revisions.
-
-```bash
-git submodule update --init --depth 1   # fetch what repo-list.txt declares
-python tools/sync_submodules.py         # add/update from repo-list.txt
-python tools/sync_submodules.py --check # report drift (used by CI)
-```
-
-Current pins:
+`data/repo/repo-list.txt` is the single source of truth. `data/repo/` holds real
+git submodules pinned to commits, so a fresh clone reproduces the exact upstream
+revisions used.
 
 | submodule | commit |
 | --- | --- |
 | `data/repo/msys2-packages` | `e555935d7e69499c19043fe2dc97599a9900bb3f` |
 | `data/repo/MINGW-packages` | `c70dff25f150b26672dbfa8e9da076f5608e4b57` |
 
-`tools/sync_submodules.py` uses git plumbing rather than `git submodule add`,
-because the latter shells out to `sh`.
+```bash
+git submodule update --init --depth 1
+python tools/sync_submodules.py         # add/update from repo-list.txt
+python tools/sync_submodules.py --check # verify registration (CI uses this)
+```
+
+`--check` validates the **registration** (`.gitmodules` + mode-160000 gitlinks),
+which is what `repo-list.txt` governs; a missing working-tree checkout is
+reported as a note, not drift, because CI checks out with `submodules: false`.
 
 ### DataLad / git-annex
 
-The repository is a DataLad dataset (id `c82f7932-78c7-4f81-9be6-364b9cd018da`),
-so large files live in git-annex and are retrieved on demand:
+The repository is initialised as a DataLad dataset (id
+`c82f7932-78c7-4f81-9be6-364b9cd018da`), so `datalad get .` retrieves annexed
+content on a clone that has git-annex available:
 
 ```bash
-datalad get .          # fetch all annexed content
-git annex whereis      # which files are annexed
+datalad get .
 ```
 
-`.gitattributes` keeps code, notebooks, docs, configuration and the small TSV
-listings in plain Git (so diffs stay reviewable) and sends anything over 100 kB
-to the annex. `data/repo/**` is never annexed.
+`.gitattributes` keeps code, notebooks, docs, config and the JSONL/TSV listings
+in plain Git so diffs stay reviewable, and routes anything over 100 kB to the
+annex.
 
-> git-annex is a system dependency, not a Python package. On Debian/Ubuntu:
-> `apt-get install git-annex`; on conda: `conda install -c conda-forge git-annex`.
-> DataLad requires ≥ 10.20230126.
+> **git-annex is a system dependency (≥ 10.20230126), not a Python package.**
+> `apt-get install git-annex`, or `conda install -c conda-forge git-annex`.
+>
+> It needs a working POSIX shell and coreutils. In environments where the MSYS2
+> runtime cannot start (it fails to create its `\BaseNamedObjects` namespace),
+> `git annex add` fails at the point it links content into the store, and the
+> `pre-commit` hook cannot run. The dataset therefore also ships every artefact
+> as a plain zstd-compressed file, so **no git-annex is required to use the
+> data** — only to exercise the annex path itself.
 
-### Tabular storage
+### Columnar table storage
 
-The dataset is CSV/JSONL oriented. When a shard outgrows a flat file, the
-fallbacks are zstd-compressed tar or SQLite for fast writes.
-
-For large tables there is a columnar, zstd-compressed layout: a **plain,
-uncompressed tar** containing one directory per table and one or more
-`.zst.partNN` members per column.
+For large tables: a **plain uncompressed tar** holding
+`<table>/<column>.zst.partNN`, one directory per table, one or more
+independently decompressable zstd frames per column.
 
 ```
-packages.tar                     # uncompressed tar container
-└── packages/
+ecosystem-matches.tar
+└── matches/
     ├── name.zst.part00
-    ├── msys2_name.zst.part00
-    ├── mingw_name.zst.part00
-    └── paired.zst.part00
+    ├── ecosystems.zst.part00
+    └── arch_names.zst.part00
 ```
 
 ```python
 from msys2_dataset.store import write_table, read_table
 
-write_table("data/processed/packages.tar", "packages", columns)
-restored = read_table("data/processed/packages.tar", dest)
+write_table("data/processed/matches.tar", "matches", columns)
 ```
 
-**Every produced file stays under 4 GiB** (`store.FAT32_MAX_BYTES` =
-4 GiB − 1) so the dataset remains transportable on FAT32. Columns whose
-compressed size would exceed the cap are split into additional parts, and each
-part is an independently decompressable zstd frame. The cap is enforced against
-*compressed* size, which is what actually lands on disk.
+**No produced file exceeds 4 GiB** (`store.FAT32_MAX_BYTES` = 4 GiB − 1), so the
+dataset stays transportable on FAT32. The cap is enforced against *compressed*
+size, which is what lands on disk; oversized columns split into more parts.
 
-SQLite is used when rows are written incrementally:
-
-```python
-from msys2_dataset.sqlite_store import write_rows, load_rows
-
-write_rows("packages.sqlite", "paired", rows, if_exists="replace")
-load_rows("packages.sqlite", "paired")
-```
-
-SQLite columns are scalar, so list-valued fields are stored as JSON strings.
-
----
+`data/processed/*.jsonl` is used while the dataset is small enough to diff; the
+tar format is the transport for when it is not. SQLite
+(`msys2_dataset.sqlite_store`) is the fast-write fallback for incremental loads.
 
 ## Command line
 
 ```bash
-msys2-dataset pair       # emit paired packages as JSONL (+ summary on stderr)
-msys2-dataset pack       # write a columnar zstd tar archive
-msys2-dataset submodules # report drift against repo-list.txt
-msys2-dataset info       # describe the storage constraints
+msys2-dataset pair        # pair msys2 against mingw (legacy; see note below)
+msys2-dataset pack        # write a columnar zstd tar archive
+msys2-dataset submodules  # report drift against repo-list.txt
+msys2-dataset info        # describe the storage constraints
 ```
 
----
+> `pair` predates the Arch work and compares MSYS2 against MINGW. Since those
+> ecosystems are not designed to correspond, prefer the Arch-based matching in
+> `msys2_dataset.matching`. `pair` is retained only for the storage-format
+> demonstrations in the notebooks.
 
 ## Dependency management
 
-`requirements.txt` is the **authoritative, committed** dependency source.
-`pyproject.toml` and `uv.lock` are deliberately **gitignored** and generated:
+`requirements.txt` is the **authoritative, committed** dependency source;
+`pyproject.toml` and `uv.lock` are gitignored and generated:
 
 ```bash
-python tools/gen_pyproject.py            # write pyproject.toml
-python tools/gen_pyproject.py --check    # verify it is current (CI uses this)
-python tools/gen_pyproject.py --version 1.2.3
+python tools/gen_pyproject.py            # write
+python tools/gen_pyproject.py --check    # verify (CI uses this)
 ```
 
-This keeps one place where pins live while still giving uv, hatchling and CI a
-build file. Runtime dependencies are taken verbatim from `requirements.txt`;
-ruff and pytest are split into the `dev` extra so they never leak into the
-published runtime set.
-
----
+Ruff and pytest are exactly pinned and split into the `dev` extra so they never
+leak into the published runtime set — an unpinned linter makes CI formatting
+sensitive to the runner's resolve order.
 
 ## Testing
 
 ```bash
-python -m pytest tests -q     # 128 tests
+python -m pytest tests -q     # 172 tests
 ruff check src tests tools
 ruff format --check src tests tools
 ```
 
-Tests use the standard library `unittest` and cover the parser, the storage
-format (including FAT32 enforcement and zstd round-trips), the SQLite path,
-package pairing, `repo-list.txt`, the pyproject generator, submodule
-registration and notebook execution.
-
----
+The scraper's parsers are tested against fixtures, never the network, so the
+suite is deterministic and offline.
 
 ## CI
 
@@ -207,9 +284,6 @@ registration and notebook execution.
 | [`publish-testpypi.yml`](.github/workflows/publish-testpypi.yml) | push to `main`, `v*` tags | build sdist+wheel, publish to TestPyPI |
 | [`sync-huggingface.yml`](.github/workflows/sync-huggingface.yml) | release published | `datalad get .`, upload `data/` to the Hub |
 
-Because `pyproject.toml` is gitignored, every workflow regenerates it with
-`tools/gen_pyproject.py` instead of inlining a heredoc.
-
 ### Required configuration
 
 | secret / variable | workflow | purpose |
@@ -217,14 +291,6 @@ Because `pyproject.toml` is gitignored, every workflow regenerates it with
 | `TEST_PYPI_API_TOKEN` | publish-testpypi | authenticate to test.pypi.org |
 | `HF_TOKEN` *(optional)* | sync-huggingface | fallback when OIDC is unavailable |
 | `HF_OIDC_RESOURCE` | sync-huggingface | target HF repo (`fufurobot/msys2-dataset`) |
-
-For HuggingFace, configure **Trusted Publishers** (Settings → Trusted
-Publishers): provider GitHub Actions, repository `fufurobot/msys2-dataset`,
-branch `main`, workflow `sync-huggingface.yml`. Without it, set `HF_TOKEN`.
-
-For models, change `--repo-type model` and adjust the path.
-
----
 
 ## License
 
