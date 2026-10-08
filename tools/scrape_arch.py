@@ -50,13 +50,36 @@ PROCESSED = DATA / "processed"
 
 
 def load_arch_jsonl(path: Path) -> list[ArchPackage]:
-    """Read back a scrape produced by :func:`write_arch_jsonl`."""
+    """Read back a scrape, transparently handling ``.zst``.
+
+    The committed artefact is zstd-compressed (about 12x smaller), so the
+    loader accepts either form.
+    """
+    if path.suffix == ".zst":
+        import zstandard
+
+        raw = (
+            zstandard.ZstdDecompressor()
+            .decompress(path.read_bytes(), max_output_size=1 << 31)
+            .decode("utf-8")
+        )
+    else:
+        raw = path.read_text(encoding="utf-8")
+
     packages: list[ArchPackage] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        packages.append(ArchPackage(**json.loads(line)))
+    for line in raw.splitlines():
+        if line.strip():
+            packages.append(ArchPackage(**json.loads(line)))
     return packages
+
+
+def _write_compressed(source: Path, level: int = 19) -> Path:
+    """Compress ``source`` to ``source.zst`` and remove the plain file."""
+    from msys2_dataset.io import compress_file_zstd
+
+    target = compress_file_zstd(source, level=level)
+    source.unlink(missing_ok=True)
+    return target
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -73,17 +96,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--reuse",
         action="store_true",
-        help="skip scraping and reuse the cached data/arch-pkgs.jsonl",
+        help="skip scraping and reuse the cached data/arch-pkgs.jsonl[.zst]",
     )
     parser.add_argument("--out", type=Path, default=ARCH_JSONL)
+    parser.add_argument(
+        "--level",
+        type=int,
+        default=19,
+        help="zstd level for the committed .jsonl.zst artefact",
+    )
     args = parser.parse_args(argv)
 
     if args.reuse:
-        if not args.out.is_file():
+        cached = args.out if args.out.is_file() else args.out.with_suffix(args.out.suffix + ".zst")
+        if not cached.is_file():
             print(f"no cached scrape at {args.out}; run without --reuse", file=sys.stderr)
             return 1
-        print(f"reusing {args.out}")
-        arch = load_arch_jsonl(args.out)
+        print(f"reusing {cached}")
+        arch = load_arch_jsonl(cached)
     else:
         print("scraping arch linux...")
         arch = scrape(
@@ -93,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
             aur_limit=None if args.aur_pages is None else args.aur_pages * 100,
         )
         write_arch_jsonl(arch, args.out)
-        print(f"wrote {len(arch)} packages to {args.out}")
+        packed = _write_compressed(args.out, level=args.level)
+        print(f"wrote {len(arch)} packages to {packed} ({packed.stat().st_size:,} bytes)")
 
     print("loading msys2 and mingw listings...")
     msys2 = parse_ls_listing_file(MSYS2_LISTING)
@@ -109,7 +140,10 @@ def main(argv: list[str] | None = None) -> int:
         for match in matches:
             handle.write(json.dumps(match.as_row(), ensure_ascii=False))
             handle.write("\n")
-    print(f"wrote {len(matches)} rows to {matches_path}")
+    packed_matches = _write_compressed(matches_path, level=args.level)
+    print(
+        f"wrote {len(matches)} rows to {packed_matches} ({packed_matches.stat().st_size:,} bytes)"
+    )
 
     summary_path = PROCESSED / "ecosystem-summary.json"
     summary_path.write_text(

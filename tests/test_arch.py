@@ -411,6 +411,17 @@ class TestScrapeCli(unittest.TestCase):
         self.assertEqual(by_name["yay"].votes, 2500)
         self.assertEqual(by_name["yay"].repo, "aur")
 
+    def test_loads_zstd_compressed_artefact(self) -> None:
+        """The committed artefact is `.jsonl.zst`; the loader must accept it."""
+        import zstandard
+
+        with scratch_dir("cli3") as tmp:
+            plain = write_arch_jsonl([ArchPackage(name="zlib", repo="core")], Path(tmp) / "a.jsonl")
+            packed = Path(tmp) / "a.jsonl.zst"
+            packed.write_bytes(zstandard.ZstdCompressor(level=3).compress(plain.read_bytes()))
+            loaded = self.scrape_arch.load_arch_jsonl(packed)
+        self.assertEqual([p.name for p in loaded], ["zlib"])
+
     def test_reuse_without_cache_fails_cleanly(self) -> None:
         with scratch_dir("cli2") as tmp:
             rc = self.scrape_arch.main(["--reuse", "--out", str(Path(tmp) / "missing.jsonl")])
@@ -432,14 +443,21 @@ class TestRealScrapeArtefacts(unittest.TestCase):
         self.assertGreater(data["counts"]["arch"], 0)
 
     def test_matches_jsonl_rows_have_expected_shape(self) -> None:
-        path = self.ROOT / "data" / "processed" / "ecosystem-matches.jsonl"
-        if not path.is_file():
+        plain = self.ROOT / "data" / "processed" / "ecosystem-matches.jsonl"
+        packed = plain.with_suffix(".jsonl.zst")
+        if packed.is_file():
+            import zstandard
+
+            text = (
+                zstandard.ZstdDecompressor()
+                .decompress(packed.read_bytes(), max_output_size=1 << 31)
+                .decode("utf-8")
+            )
+        elif plain.is_file():
+            text = plain.read_text(encoding="utf-8")
+        else:
             self.skipTest("no scrape has been run")
-        rows = [
-            json.loads(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        rows = [json.loads(line) for line in text.splitlines() if line.strip()]
         self.assertGreater(len(rows), 0)
         for row in rows[:200]:
             self.assertIn("name", row)
@@ -448,11 +466,21 @@ class TestRealScrapeArtefacts(unittest.TestCase):
                 self.assertIsInstance(row[key], bool)
 
     def test_arch_jsonl_rows_load_back(self) -> None:
-        path = self.ROOT / "data" / "arch-pkgs.jsonl"
-        if not path.is_file():
+        plain = self.ROOT / "data" / "arch-pkgs.jsonl"
+        packed = plain.with_suffix(".jsonl.zst")
+        if packed.is_file():
+            import zstandard
+
+            text = (
+                zstandard.ZstdDecompressor()
+                .decompress(packed.read_bytes(), max_output_size=1 << 31)
+                .decode("utf-8")
+            )
+        elif plain.is_file():
+            text = plain.read_text(encoding="utf-8")
+        else:
             self.skipTest("no scrape has been run")
-        first = path.read_text(encoding="utf-8").splitlines()[0]
-        package = ArchPackage(**json.loads(first))
+        package = ArchPackage(**json.loads(text.splitlines()[0]))
         self.assertTrue(package.name)
         self.assertTrue(package.repo)
 

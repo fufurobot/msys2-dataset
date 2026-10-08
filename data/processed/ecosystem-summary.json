@@ -1,0 +1,25 @@
+{
+  "counts": {
+    "arch": 15324,
+    "mingw": 3361,
+    "msys2": 608
+  },
+  "sources": {
+    "arch_repos": [
+      "core",
+      "extra"
+    ],
+    "include_aur": false
+  },
+  "stats": {
+    "all_three": 281,
+    "arch_matched": 2453,
+    "arch_mingw": 2263,
+    "arch_msys2": 471,
+    "arch_only": 12827,
+    "arch_total": 15280,
+    "mingw_total": 3356,
+    "msys2_total": 589,
+    "total": 16472
+  }
+}

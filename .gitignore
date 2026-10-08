@@ -233,9 +233,21 @@ pytest-cache-files-*/
 .jupyter-config/
 .jupyter-tmp/
 
-# Generated dataset artifacts: keep the directories, not their contents.
-# (Tracked inputs live in data/*.tsv and the data/repo submodules.)
+# Generated dataset artifacts.
+#
+# `data/raw/` holds intermediate downloads and is never committed. The
+# processed scrape outputs ARE committed, zstd-compressed (see below), so
+# only ad-hoc scratch and un-packed duplicates are ignored.
 data/raw/*
-data/processed/*
 !data/raw/.gitkeep
+data/processed/*.tar
+data/processed/*.sqlite
+data/processed/*.sqlite-*
+data/processed/*.db
+
+# The uncompressed JSONL is regenerated from the committed `.jsonl.zst`, which
+# is 10x smaller. Keeping only the compressed form stops the same data being
+# committed twice.
+data/arch-pkgs.jsonl
+data/processed/ecosystem-matches.jsonl
 !data/processed/.gitkeep
