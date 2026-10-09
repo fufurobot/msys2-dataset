@@ -6,6 +6,11 @@
 # running `uv sync`. It is idempotent and safe to re-run.
 set -euo pipefail
 
+echo "==> installing uv"
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+
 cd "$(dirname "$0")/.."
 
 echo "==> generating pyproject.toml from requirements.txt"

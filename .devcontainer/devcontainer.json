@@ -1,10 +1,6 @@
 {
   "name": "msys2-dataset",
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
-  "features": {
-    "ghcr.io/astral-sh/uv-devcontainer-features/uv:1": {},
-    "ghcr.io/jsburckhardt/devcontainer-features/ruff:1": {}
-  },
   "customizations": {
     "vscode": {
       "extensions": [
