@@ -6,8 +6,7 @@
 [![TestPyPI](https://img.shields.io/badge/TestPyPI-v0.1.0-blue)](https://test.pypi.org/project/msys2-dataset/)
 [![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hub-dataset-yellow)](https://huggingface.co/datasets/fufurobot/msys2-dataset)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 # msys2-dataset
 
 Match **Arch Linux** (`core`, `extra`, `AUR`) packages against **MSYS2** and
@@ -306,4 +305,16 @@ suite is deterministic and offline.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+
+The full text of the license is available in the [LICENSE](LICENSE) file.
+
+### Network Use (AGPL Section 13)
+
+This license includes a "network use" clause. In accordance with **Section 13** of the AGPL-3.0:
+
+If you modify this software and make it available to users over a computer network (for example, as a web service), you **must** offer those users the opportunity to receive the corresponding source code of your modified version, at no charge.
+
+### Source Code Availability
+
+The source code for this project is available at [here](https://github.com/fufurobot/msys2-dataset).
