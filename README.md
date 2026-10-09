@@ -15,6 +15,12 @@ Match **Arch Linux** (`core`, `extra`, `AUR`) packages against **MSYS2** and
 > This project exists on Arch as `foo`. Does MSYS2 ship it? Does MINGW? Under
 > what name?
 
+# TODOs
+
+- [ ] deepseek use `node` to escape from sandbox, which is ugly and not necessary because user are not expected to install `node`, and even the `envrionment.yml` does not specify `node` as dependency. A `requests` call is much better to not introduce the heavy `node`. 
+
+
+
 ## Why Arch is the reference point
 
 MSYS2 and MINGW packages are **not** designed to correspond to each other. They
