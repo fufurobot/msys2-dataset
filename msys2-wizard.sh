@@ -45,11 +45,12 @@ fi
 # ============================================================================
 # NOTE: jq and git are intentionally NOT installed here — see step 4, where
 # the user chooses between pacman / pacman-mingw / skip for each.
+# NOTE: perl-text-csv is deliberately NEVER installed.
 step_install_base() {
-    info "Step 2 — Installing base packages (tmux, zsh, perl-text-csv, pactoys) …"
-    if confirm "Install tmux, zsh, perl-text-csv, pactoys via pacman?"; then
+    info "Step 2 — Installing base packages (tmux, zsh, pactoys) …"
+    if confirm "Install tmux, zsh, pactoys via pacman?"; then
         pacman -S --needed --noconfirm \
-            tmux zsh perl-text-csv pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
+            tmux zsh pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
         ok "Base packages installed."
     else
         warn "Skipped base package installation."
