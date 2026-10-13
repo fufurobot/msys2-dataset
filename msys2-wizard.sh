@@ -274,7 +274,7 @@ step_install_oh_my_zsh() {
 }
 
 # ============================================================================
-# 8.  Install tmux-service CLI
+# 8.  Install tmux-service CLI (JSONL-backed)
 # ============================================================================
 step_install_tmux_service() {
     info "Step 8 — Installing tmux-service CLI …"
@@ -284,43 +284,62 @@ step_install_tmux_service() {
 
     cat > "${svc_dir}/tmux-service" <<'TMUX_SERVICE_EOF'
 #!/usr/bin/env bash
-# tmux-service — launch/stop/manage services defined in ~/tmux-service.csv
-# CSV columns: name,cmd,tmux_layout_json
-# Layout JSON can contain: {"layout":"even-vertical"} etc.
+# tmux-service — launch/stop/manage services defined in ~/tmux-service.jsonl
+#
+# Each line of the JSONL file is one service object:
+#   {"name":"web","cmd":"python -m http.server","layout":{"layout":"even-vertical"}}
+#
+# The optional "layout" field is a tmux layout spec, e.g.:
+#   {"layout":"even-vertical"}    (default)
+#   {"layout":"even-horizontal"}
+#   {"layout":"main-vertical"}
+#   {"layout":"tiled"}
+#
+# jq is required at runtime.
 
 set -euo pipefail
 
-CSV_FILE="${TMUX_SERVICE_CSV:-$HOME/tmux-service.csv}"
+JSONL_FILE="${TMUX_SERVICE_JSONL:-$HOME/tmux-service.jsonl}"
 SESSION="${TMUX_SERVICE_SESSION:-services}"
 WINDOW="${TMUX_SERVICE_WINDOW:-main}"
+DEFAULT_LAYOUT="even-vertical"
 
 # ---------- helpers -------------------------------------------------------
 die() { echo "tmux-service: $*" >&2; exit 1; }
 require_tmux() { command -v tmux >/dev/null 2>&1 || die "tmux not found"; }
+require_jq()   { command -v jq   >/dev/null 2>&1 || die "jq not found (required to parse ${JSONL_FILE})"; }
 
-# ---------- CSV parsing (requires jq for JSON layout) ---------------------
-parse_csv() {
-    [[ -f "$CSV_FILE" ]] || die "CSV file not found: $CSV_FILE"
-    command -v jq >/dev/null 2>&1 || die "jq not found (required for layout JSON)"
-    # Skip header, output "name<TAB>cmd<TAB>layout_json"
-    tail -n +2 "$CSV_FILE" | while IFS=, read -r name cmd layout; do
-        # strip surrounding quotes if present
-        name="${name%\"}"; name="${name#\"}"
-        cmd="${cmd%\"}";  cmd="${cmd#\"}"
-        layout="${layout%\"}"; layout="${layout#\"}"
-        printf '%s\t%s\t%s\n' "$name" "$cmd" "$layout"
-    done
+# Print "name<TAB>cmd<TAB>layout" for every entry in the JSONL file.
+iter_entries() {
+    require_jq
+    [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
+    jq -r '[.name, .cmd, (.layout.layout // "'"${DEFAULT_LAYOUT}"'")] | @tsv' "$JSONL_FILE"
 }
 
 # ---------- commands ------------------------------------------------------
 cmd_run() {
     require_tmux
     local -a cmds=("$@")
+    local layout="$DEFAULT_LAYOUT"
+
     if [[ ${#cmds[@]} -eq 0 ]]; then
-        # Read from CSV
-        while IFS=$'\t' read -r name cmd layout; do
-            cmds+=("$cmd")
-        done < <(parse_csv)
+        require_jq
+        [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
+
+        # Read every cmd (one per line) into the array.
+        local line
+        while IFS= read -r line; do
+            cmds+=("$line")
+        done < <(jq -r '.cmd' "$JSONL_FILE")
+
+        # Honor the layout of the first entry, if present.
+        if [[ -s "$JSONL_FILE" ]]; then
+            layout="$(jq -r --arg d "$DEFAULT_LAYOUT" '.layout.layout // $d' "$JSONL_FILE" | head -n1)"
+        fi
+    fi
+
+    if [[ ${#cmds[@]} -eq 0 ]]; then
+        die "No commands to run (JSONL file is empty and no args given)."
     fi
 
     # Ensure session/window exist
@@ -341,35 +360,56 @@ cmd_run() {
         ((pane_index++)) || true
     done
 
-    # Apply even-vertical layout by default
-    tmux select-layout -t "$SESSION:$WINDOW" even-vertical
-    tmux select-pane -t "$SESSION:$WINDOW.0"
+    tmux select-layout -t "$SESSION:$WINDOW" "$layout"
+    tmux select-pane  -t "$SESSION:$WINDOW.0"
     tmux attach -t "$SESSION"
 }
 
 cmd_add() {
-    local name="$1" cmd="$2" layout="${3:-{\"layout\":\"even-vertical\"}}"
-    [[ -f "$CSV_FILE" ]] || echo "name,cmd,tmux_layout_json" > "$CSV_FILE"
-    echo "${name},${cmd},${layout}" >> "$CSV_FILE"
+    require_jq
+    local name="${1:-}" cmd="${2:-}" layout="${3:-$DEFAULT_LAYOUT}"
+    [[ -n "$name" ]] || die "add: missing <name>"
+    [[ -n "$cmd"  ]] || die "add: missing <cmd>"
+
+    jq -nc \
+        --arg n "$name" \
+        --arg c "$cmd" \
+        --arg l "$layout" \
+        '{name:$n, cmd:$c, layout:{layout:$l}}' >> "$JSONL_FILE"
+
     echo "Added ${name}."
 }
 
 cmd_remove() {
-    local name="$1"
-    [[ -f "$CSV_FILE" ]] || die "CSV file not found."
-    grep -v "^${name}," "$CSV_FILE" > "${CSV_FILE}.tmp" && mv "${CSV_FILE}.tmp" "$CSV_FILE"
+    require_jq
+    local name="${1:-}"
+    [[ -n "$name" ]] || die "remove: missing <name>"
+    [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
+
+    local tmp="${JSONL_FILE}.tmp"
+    jq -c --arg n "$name" 'select(.name != $n)' "$JSONL_FILE" > "$tmp" \
+        && mv "$tmp" "$JSONL_FILE"
     echo "Removed ${name}."
 }
 
 cmd_list() {
-    [[ -f "$CSV_FILE" ]] || die "CSV file not found."
-    column -t -s, "$CSV_FILE"
+    require_jq
+    [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
+    if ! iter_entries | column -t -s $'\t'; then
+        die "list: failed to render entries."
+    fi
 }
 
 cmd_search() {
-    local pattern="$1"
-    [[ -f "$CSV_FILE" ]] || die "CSV file not found."
-    grep -i "$pattern" "$CSV_FILE" | column -t -s,
+    require_jq
+    local pattern="${1:-}"
+    [[ -n "$pattern" ]] || die "search: missing <pattern>"
+    [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
+
+    jq -r --arg p "$pattern" \
+        'select((.name + " " + .cmd) | test($p; "i"))
+         | [.name, .cmd, (.layout.layout // "'"${DEFAULT_LAYOUT}"'")] | @tsv' \
+        "$JSONL_FILE" | column -t -s $'\t'
 }
 
 # ---------- dispatch ------------------------------------------------------
@@ -386,10 +426,10 @@ TMUX_SERVICE_EOF
     chmod +x "${svc_dir}/tmux-service"
     ok "tmux-service installed to ${svc_dir}"
 
-    # Create an empty CSV if it doesn't exist
-    if [[ ! -f "${HOME}/tmux-service.csv" ]]; then
-        echo 'name,cmd,tmux_layout_json' > "${HOME}/tmux-service.csv"
-        ok "Created empty ~/tmux-service.csv"
+    # Create an empty JSONL file if it doesn't exist.
+    if [[ ! -f "${HOME}/tmux-service.jsonl" ]]; then
+        : > "${HOME}/tmux-service.jsonl"
+        ok "Created empty ~/tmux-service.jsonl"
     fi
 }
 
