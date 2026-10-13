@@ -43,13 +43,13 @@ fi
 # ============================================================================
 # 2.  Install base packages via pacman (MSYS2 side)
 # ============================================================================
-# NOTE: jq is intentionally NOT installed here — see step 4, where the user
-# chooses between pacman / pacman-mingw / skip.
+# NOTE: jq and git are intentionally NOT installed here — see step 4, where
+# the user chooses between pacman / pacman-mingw / skip for each.
 step_install_base() {
-    info "Step 2 — Installing base packages (tmux, zsh, perl-text-csv, git) …"
-    if confirm "Install tmux, zsh, perl-text-csv, git, pactoys via pacman?"; then
+    info "Step 2 — Installing base packages (tmux, zsh, perl-text-csv, pactoys) …"
+    if confirm "Install tmux, zsh, perl-text-csv, pactoys via pacman?"; then
         pacman -S --needed --noconfirm \
-            tmux zsh perl-text-csv git pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
+            tmux zsh perl-text-csv pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
         ok "Base packages installed."
     else
         warn "Skipped base package installation."
@@ -130,59 +130,66 @@ ZSH_COMPDEF_EOF
 }
 
 # ============================================================================
-# 4.  Install jq — user chooses pacman / pacman-mingw / skip
+# 4.  Install jq and git — user chooses pacman / pacman-mingw / skip for each
 # ============================================================================
-step_install_jq() {
-    info "Step 4 — Installing jq …"
+step_install_jq_git() {
+    info "Step 4 — Installing jq and git …"
     echo
-    echo "  jq is required at runtime by the tmux-service CLI (installed later)."
-    echo "  Choose how jq should be installed:"
-    echo
-    if [[ "$MODE" == "mingw" ]]; then
-        echo "    1) pacman        — MSYS2-side jq (path: /usr/bin/jq)"
-        echo "    2) pacman-mingw  — MINGW-side jq (pkg: ${MINGW_PACKAGE_PREFIX}-jq)"
-        echo "    3) do not install — skip jq entirely"
-    else
-        echo "    1) pacman        — MSYS2-side jq (path: /usr/bin/jq)"
-        echo "    2) pacman-mingw  — MINGW-side jq (in MSYS2 mode this is just pacman)"
-        echo "    3) do not install — skip jq entirely"
-    fi
-    echo
-    echo "  Note: tmux-service will fail at runtime until jq is available on PATH."
+    echo "  Both jq and git are needed by various tools (tmux-service uses jq;"
+    echo "  development workflows use git).  Choose how each should be installed."
     echo
 
-    local choice
-    read -r -p "$(printf "${YELLOW}Select [1/2/3] (default: 1): ${NC}")" choice
-    choice="${choice:-1}"
+    # Helper: ask for one package and install accordingly.
+    _install_one() {
+        local pkg="$1"
+        local choice
+        echo "  ── ${pkg} ──────────────────────────────────────────────"
+        if [[ "$MODE" == "mingw" ]]; then
+            echo "    1) pacman        — MSYS2-side ${pkg} (path: /usr/bin/${pkg})"
+            echo "    2) pacman-mingw  — MINGW-side ${pkg} (pkg: ${MINGW_PACKAGE_PREFIX}-${pkg})"
+            echo "    3) do not install — skip ${pkg} entirely"
+        else
+            echo "    1) pacman        — MSYS2-side ${pkg} (path: /usr/bin/${pkg})"
+            echo "    2) pacman-mingw  — MINGW-side ${pkg} (in MSYS2 mode this is just pacman)"
+            echo "    3) do not install — skip ${pkg} entirely"
+        fi
+        echo
+        read -r -p "$(printf "${YELLOW}Select [1/2/3] (default: 1): ${NC}")" choice
+        choice="${choice:-1}"
 
-    case "$choice" in
-        1)
-            if confirm "Install jq via pacman?"; then
-                pacman -S --needed --noconfirm jq 2>&1 | tee -a /tmp/msys2-init-pacman.log
-                ok "jq installed via pacman."
-            else
-                warn "Skipped jq installation (via pacman)."
-            fi
-            ;;
-        2)
-            if [[ "$MODE" != "mingw" ]]; then
-                warn "Not in a MINGW environment — pacman-mingw will pass through to plain pacman."
-            fi
-            if confirm "Install jq via pacman-mingw?"; then
-                pacman-mingw -S --needed --noconfirm jq 2>&1 | tee -a /tmp/msys2-init-pacman.log
-                ok "jq installed via pacman-mingw."
-            else
-                warn "Skipped jq installation (via pacman-mingw)."
-            fi
-            ;;
-        3)
-            warn "Skipping jq."
-            warn "Install it later with 'pacman -S jq' or 'pacman-mingw -S jq'."
-            ;;
-        *)
-            warn "Invalid choice '${choice}' — skipping jq."
-            ;;
-    esac
+        case "$choice" in
+            1)
+                if confirm "Install ${pkg} via pacman?"; then
+                    pacman -S --needed --noconfirm "$pkg" 2>&1 | tee -a /tmp/msys2-init-pacman.log
+                    ok "${pkg} installed via pacman."
+                else
+                    warn "Skipped ${pkg} installation (via pacman)."
+                fi
+                ;;
+            2)
+                if [[ "$MODE" != "mingw" ]]; then
+                    warn "Not in a MINGW environment — pacman-mingw will pass through to plain pacman."
+                fi
+                if confirm "Install ${pkg} via pacman-mingw?"; then
+                    pacman-mingw -S --needed --noconfirm "$pkg" 2>&1 | tee -a /tmp/msys2-init-pacman.log
+                    ok "${pkg} installed via pacman-mingw."
+                else
+                    warn "Skipped ${pkg} installation (via pacman-mingw)."
+                fi
+                ;;
+            3)
+                warn "Skipping ${pkg}."
+                warn "Install it later with 'pacman -S ${pkg}' or 'pacman-mingw -S ${pkg}'."
+                ;;
+            *)
+                warn "Invalid choice '${choice}' — skipping ${pkg}."
+                ;;
+        esac
+        echo
+    }
+
+    _install_one "jq"
+    _install_one "git"
 }
 
 # ============================================================================
@@ -425,7 +432,7 @@ main() {
     echo
     step_install_pacman_mingw
     echo
-    step_install_jq
+    step_install_jq_git
     echo
     step_install_dev_packages
     echo
