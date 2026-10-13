@@ -196,6 +196,8 @@ step_install_jq_git() {
 # ============================================================================
 # 5.  Install MINGW-side development packages via pacman-mingw
 # ============================================================================
+# NOTE: python-playwright does NOT exist in MINGW/MSYS2 repos — it is
+# installed via pipx in step 6 instead.
 step_install_dev_packages() {
     info "Step 5 — Installing MINGW development packages …"
 
@@ -216,7 +218,6 @@ step_install_dev_packages() {
         neovim
         go
         roswell
-        python-playwright
         python-pipx
     )
 
@@ -235,10 +236,58 @@ step_install_dev_packages() {
 }
 
 # ============================================================================
-# 6.  tmux default shell → zsh
+# 6.  Install Playwright via pipx (MINGW-side)
+# ============================================================================
+# Workaround for https://github.com/msys2/MINGW-packages/issues/30922 :
+# pipx implicitly prefers the `uv` backend whenever uv is on PATH, but uv
+# does not recognize the MINGW platform string (e.g. mingw_x86_64_ucrt) and
+# fails.  Setting PIPX_DEFAULT_BACKEND=pip forces pipx to use the pip/venv
+# backend, which works correctly on MSYS2/MINGW.
+step_install_playwright() {
+    info "Step 6 — Installing Playwright via pipx …"
+
+    if [[ "$MODE" != "mingw" ]]; then
+        warn "Not in a MINGW environment.  Skipping Playwright installation."
+        warn "Open a 'MSYS2 MINGW64' shell and re-run this step if needed."
+        return
+    fi
+
+    # python-pipx is installed in step 5 (dev packages).
+    if ! command -v pipx >/dev/null 2>&1; then
+        warn "pipx not found.  Install it first with: pacman-mingw -S python-pipx"
+        return
+    fi
+
+    # --- The critical MSYS2/MINGW workaround ---------------------------------
+    export PIPX_DEFAULT_BACKEND=pip
+    info "Set PIPX_DEFAULT_BACKEND=pip (avoids uv incompatibility on MINGW)."
+    # ------------------------------------------------------------------------
+
+    if confirm "Install Playwright via pipx?"; then
+        if pipx install playwright 2>&1 | tee -a /tmp/msys2-init-pipx.log; then
+            ok "Playwright installed via pipx."
+        else
+            warn "pipx install playwright failed — see /tmp/msys2-init-pipx.log"
+            return
+        fi
+
+        if confirm "Download Playwright browser binaries (chromium)?"; then
+            if playwright install chromium 2>&1 | tee -a /tmp/msys2-init-pipx.log; then
+                ok "Chromium browser binaries installed."
+            else
+                warn "playwright install chromium failed — see /tmp/msys2-init-pipx.log"
+            fi
+        fi
+    else
+        warn "Skipped Playwright installation."
+    fi
+}
+
+# ============================================================================
+# 7.  tmux default shell → zsh
 # ============================================================================
 step_tmux_zsh() {
-    info "Step 6 — Setting tmux default shell to zsh …"
+    info "Step 7 — Setting tmux default shell to zsh …"
     local tmux_conf="${HOME}/.tmux.conf"
     if grep -q 'default-shell.*zsh' "$tmux_conf" 2>/dev/null; then
         ok "tmux default-shell already set to zsh."
@@ -251,10 +300,10 @@ step_tmux_zsh() {
 }
 
 # ============================================================================
-# 7.  Install oh-my-zsh from fufurobot/oh-my-zsh-git-msys2
+# 8.  Install oh-my-zsh from fufurobot/oh-my-zsh-git-msys2
 # ============================================================================
 step_install_oh_my_zsh() {
-    info "Step 7 — Installing oh-my-zsh (fufurobot/oh-my-zsh-git-msys2) …"
+    info "Step 8 — Installing oh-my-zsh (fufurobot/oh-my-zsh-git-msys2) …"
 
     if [[ -d /usr/share/oh-my-zsh ]]; then
         ok "oh-my-zsh already installed at /usr/share/oh-my-zsh."
@@ -275,10 +324,10 @@ step_install_oh_my_zsh() {
 }
 
 # ============================================================================
-# 8.  Install tmux-service CLI (JSONL-backed)
+# 9.  Install tmux-service CLI (JSONL-backed)
 # ============================================================================
 step_install_tmux_service() {
-    info "Step 8 — Installing tmux-service CLI …"
+    info "Step 9 — Installing tmux-service CLI …"
 
     local svc_dir="${HOME}/.local/bin"
     mkdir -p "$svc_dir"
@@ -435,10 +484,10 @@ TMUX_SERVICE_EOF
 }
 
 # ============================================================================
-# 9.  Zsh aliases: windows-home, msys2-temp
+# 10. Zsh aliases: windows-home, msys2-temp
 # ============================================================================
 step_zsh_aliases() {
-    info "Step 9 — Adding zsh aliases (windows-home, msys2-temp) …"
+    info "Step 10 — Adding zsh aliases (windows-home, msys2-temp) …"
     local zshrc="${HOME}/.zshrc"
 
     if grep -q "alias windows-home" "$zshrc" 2>/dev/null; then
@@ -461,7 +510,7 @@ ZSH_ALIASES_EOF
 }
 
 # ============================================================================
-# 10. Main wizard
+# 11. Main wizard
 # ============================================================================
 main() {
     echo "============================================================"
@@ -476,6 +525,8 @@ main() {
     step_install_jq_git
     echo
     step_install_dev_packages
+    echo
+    step_install_playwright
     echo
     step_tmux_zsh
     echo
