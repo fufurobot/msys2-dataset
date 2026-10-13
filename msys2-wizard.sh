@@ -1,0 +1,383 @@
+#!/usr/bin/env bash
+# msys2-init.sh — wizard for a Zsh + tmux + MSYS2/MINGW development environment
+# Never writes to MINGW_PACKAGE_PREFIX. Safe to re‑run.
+
+set -euo pipefail
+
+# ============================================================================
+# 0.  Helpers
+# ============================================================================
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+info()  { printf "${CYAN}[INFO]${NC} %s\n" "$*"; }
+ok()    { printf "${GREEN}[OK]${NC} %s\n" "$*"; }
+warn()  { printf "${YELLOW}[WARN]${NC} %s\n" "$*"; }
+error() { printf "${RED}[ERROR]${NC} %s\n" "$*"; }
+
+confirm() {
+    local prompt="${1:-Continue?}"
+    local answer
+    read -r -p "$(printf "${YELLOW}%s [y/N] " "$prompt")" answer
+    [[ "$answer" =~ ^[Yy] ]]
+}
+
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        error "Required command '$1' not found. Aborting."
+        exit 1
+    fi
+}
+
+# ============================================================================
+# 1.  Environment detection
+# ============================================================================
+# MINGW_PACKAGE_PREFIX is set by MSYS2's mingw environments; never touch it.
+if [[ -n "${MINGW_PACKAGE_PREFIX:-}" ]]; then
+    MODE="mingw"
+    info "Detected MINGW environment (prefix: ${MINGW_PACKAGE_PREFIX})"
+else
+    MODE="msys2"
+    info "Detected MSYS2 environment (no MINGW_PACKAGE_PREFIX)"
+fi
+
+# ============================================================================
+# 2.  Install base packages via pacman (MSYS2 side)
+# ============================================================================
+step_install_base() {
+    info "Step 2 — Installing base packages (tmux, zsh, perl‑text‑csv, jq, git) …"
+    if confirm "Install tmux, zsh, perl-text-csv, jq, git via pacman?"; then
+        pacman -S --needed --noconfirm \
+            tmux zsh perl-text-csv jq git pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
+        ok "Base packages installed."
+    else
+        warn "Skipped base package installation."
+    fi
+}
+
+# ============================================================================
+# 3.  Install pacman‑mingw wrapper + completions
+# ============================================================================
+step_install_pacman_mingw() {
+    info "Step 3 — Installing pacman‑mingw wrapper …"
+
+    local wrapper_dir="${HOME}/.local/bin"
+    mkdir -p "$wrapper_dir"
+
+    cat > "${wrapper_dir}/pacman-mingw" <<'PACMAN_MINGW_EOF'
+#!/usr/bin/env bash
+# pacman-mingw — transparent pacman wrapper that injects $MINGW_PACKAGE_PREFIX
+# when running inside a MINGW environment.  In MSYS2 mode it behaves exactly
+# like plain pacman.
+
+set -euo pipefail
+
+if [[ -z "${MINGW_PACKAGE_PREFIX:-}" ]]; then
+    # MSYS2 mode: pass everything through to pacman unchanged.
+    exec pacman "$@"
+fi
+
+# MINGW mode: prefix any argument that looks like a package name.
+# Package names are arguments that do NOT start with '-' and are not existing
+# files.  We keep the original arguments and prepend the prefix.
+declare -a new_args=()
+for arg in "$@"; do
+    if [[ "$arg" == -* ]]; then
+        new_args+=("$arg")
+    elif [[ -e "$arg" ]]; then          # allow file paths (e.g. -U ./pkg.tar.zst)
+        new_args+=("$arg")
+    else
+        # Heuristic: if the arg already starts with "mingw-w64-" leave it alone
+        if [[ "$arg" == mingw-w64-* ]]; then
+            new_args+=("$arg")
+        else
+            new_args+=("${MINGW_PACKAGE_PREFIX}-${arg}")
+        fi
+    fi
+done
+
+exec pacman "${new_args[@]}"
+PACMAN_MINGW_EOF
+
+    chmod +x "${wrapper_dir}/pacman-mingw"
+    ok "pacman-mingw installed to ${wrapper_dir}"
+
+    # ----- Zsh completions -------------------------------------------------
+    local zshrc="${HOME}/.zshrc"
+    if [[ -f "$zshrc" ]] && grep -q "compdef pacman-mingw" "$zshrc"; then
+        ok "Zsh completions for pacman-mingw already present."
+    else
+        if confirm "Add pacman-mingw completions to ~/.zshrc?"; then
+            cat >> "$zshrc" <<'ZSH_COMPDEF_EOF'
+
+# --- pacman-mingw completions (share pacman completions) ---
+if [[ -n "${MINGW_PACKAGE_PREFIX:-}" ]]; then
+    compdef _pacman pacman-mingw=pacman
+fi
+ZSH_COMPDEF_EOF
+            ok "Completions added to ~/.zshrc"
+        fi
+    fi
+
+    # Ensure ~/.local/bin is on PATH
+    if [[ ":$PATH:" != *":${wrapper_dir}:"* ]]; then
+        warn "${wrapper_dir} is not on PATH. Add it to your shell profile."
+    fi
+}
+
+# ============================================================================
+# 4.  Install MINGW‑side development packages via pacman‑mingw
+# ============================================================================
+step_install_dev_packages() {
+    info "Step 4 — Installing MINGW development packages …"
+
+    if [[ "$MODE" != "mingw" ]]; then
+        warn "Not in a MINGW environment.  Skipping MINGW‑side packages."
+        warn "Open a 'MSYS2 MINGW64' shell and re‑run this step if needed."
+        return
+    fi
+
+    local packages=(
+        aichat
+        llama.cpp
+        git
+        uv
+        rust
+        nodejs
+        clang-tools-extra
+        neovim
+        go
+        roswell
+        python-playwright
+        python-pipx
+    )
+
+    info "The following packages will be installed with pacman-mingw:"
+    printf '  %s\n' "${packages[@]}"
+
+    if confirm "Install these MINGW packages?"; then
+        for pkg in "${packages[@]}"; do
+            info "Installing ${MINGW_PACKAGE_PREFIX}-${pkg} …"
+            pacman-mingw -S --needed --noconfirm "$pkg" 2>&1 | tee -a /tmp/msys2-init-pacman.log
+        done
+        ok "MINGW development packages installed."
+    else
+        warn "Skipped MINGW development packages."
+    fi
+}
+
+# ============================================================================
+# 5.  tmux default shell → zsh
+# ============================================================================
+step_tmux_zsh() {
+    info "Step 5 — Setting tmux default shell to zsh …"
+    local tmux_conf="${HOME}/.tmux.conf"
+    if grep -q 'default-shell.*zsh' "$tmux_conf" 2>/dev/null; then
+        ok "tmux default-shell already set to zsh."
+    else
+        if confirm "Add 'set -g default-shell /usr/bin/zsh' to ~/.tmux.conf?"; then
+            echo 'set -g default-shell /usr/bin/zsh' >> "$tmux_conf"
+            ok "tmux default-shell set to zsh."
+        fi
+    fi
+}
+
+# ============================================================================
+# 6.  Install oh‑my‑zsh from fufurobot/oh-my-zsh-git-msys2
+# ============================================================================
+step_install_oh_my_zsh() {
+    info "Step 6 — Installing oh‑my‑zsh (fufurobot/oh-my-zsh-git-msys2) …"
+
+    if [[ -d /usr/share/oh-my-zsh ]]; then
+        ok "oh-my-zsh already installed at /usr/share/oh-my-zsh."
+        return
+    fi
+
+    if ! confirm "Clone and build fufurobot/oh-my-zsh-git-msys2?"; then
+        warn "Skipped oh-my-zsh installation."
+        return
+    fi
+
+    local build_dir
+    build_dir="$(mktemp -d)"
+    git clone https://github.com/fufurobot/oh-my-zsh-git-msys2.git "$build_dir"
+    (cd "$build_dir" && makepkg -si --noconfirm)
+    rm -rf "$build_dir"
+    ok "oh-my-zsh installed."
+}
+
+# ============================================================================
+# 7.  Install tmux‑service CLI
+# ============================================================================
+step_install_tmux_service() {
+    info "Step 7 — Installing tmux-service CLI …"
+
+    local svc_dir="${HOME}/.local/bin"
+    mkdir -p "$svc_dir"
+
+    cat > "${svc_dir}/tmux-service" <<'TMUX_SERVICE_EOF'
+#!/usr/bin/env bash
+# tmux-service — launch/stop/manage services defined in ~/tmux-service.csv
+# CSV columns: name,cmd,tmux_layout_json
+# Layout JSON can contain: {"layout":"even-vertical"} etc.
+
+set -euo pipefail
+
+CSV_FILE="${TMUX_SERVICE_CSV:-$HOME/tmux-service.csv}"
+SESSION="${TMUX_SERVICE_SESSION:-services}"
+WINDOW="${TMUX_SERVICE_WINDOW:-main}"
+
+# ---------- helpers -------------------------------------------------------
+die() { echo "tmux-service: $*" >&2; exit 1; }
+require_tmux() { command -v tmux >/dev/null 2>&1 || die "tmux not found"; }
+
+# ---------- CSV parsing (requires jq for JSON layout) ---------------------
+parse_csv() {
+    [[ -f "$CSV_FILE" ]] || die "CSV file not found: $CSV_FILE"
+    command -v jq >/dev/null 2>&1 || die "jq not found (required for layout JSON)"
+    # Skip header, output "name<TAB>cmd<TAB>layout_json"
+    tail -n +2 "$CSV_FILE" | while IFS=, read -r name cmd layout; do
+        # strip surrounding quotes if present
+        name="${name%\"}"; name="${name#\"}"
+        cmd="${cmd%\"}";  cmd="${cmd#\"}"
+        layout="${layout%\"}"; layout="${layout#\"}"
+        printf '%s\t%s\t%s\n' "$name" "$cmd" "$layout"
+    done
+}
+
+# ---------- commands ------------------------------------------------------
+cmd_run() {
+    require_tmux
+    local -a cmds=("$@")
+    if [[ ${#cmds[@]} -eq 0 ]]; then
+        # Read from CSV
+        while IFS=$'\t' read -r name cmd layout; do
+            cmds+=("$cmd")
+        done < <(parse_csv)
+    fi
+
+    # Ensure session/window exist
+    if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+        tmux new-session -d -s "$SESSION" -n "$WINDOW"
+    else
+        tmux new-window -t "$SESSION" -n "$WINDOW"
+    fi
+
+    local pane_index=0
+    for cmd in "${cmds[@]}"; do
+        if [[ $pane_index -eq 0 ]]; then
+            tmux send-keys -t "$SESSION:$WINDOW.$pane_index" "$cmd" C-m
+        else
+            tmux split-window -v -t "$SESSION:$WINDOW"
+            tmux send-keys -t "$SESSION:$WINDOW.$pane_index" "$cmd" C-m
+        fi
+        ((pane_index++)) || true
+    done
+
+    # Apply even-vertical layout by default
+    tmux select-layout -t "$SESSION:$WINDOW" even-vertical
+    tmux select-pane -t "$SESSION:$WINDOW.0"
+    tmux attach -t "$SESSION"
+}
+
+cmd_add() {
+    local name="$1" cmd="$2" layout="${3:-{\"layout\":\"even-vertical\"}}"
+    [[ -f "$CSV_FILE" ]] || echo "name,cmd,tmux_layout_json" > "$CSV_FILE"
+    echo "${name},${cmd},${layout}" >> "$CSV_FILE"
+    echo "Added ${name}."
+}
+
+cmd_remove() {
+    local name="$1"
+    [[ -f "$CSV_FILE" ]] || die "CSV file not found."
+    grep -v "^${name}," "$CSV_FILE" > "${CSV_FILE}.tmp" && mv "${CSV_FILE}.tmp" "$CSV_FILE"
+    echo "Removed ${name}."
+}
+
+cmd_list() {
+    [[ -f "$CSV_FILE" ]] || die "CSV file not found."
+    column -t -s, "$CSV_FILE"
+}
+
+cmd_search() {
+    local pattern="$1"
+    [[ -f "$CSV_FILE" ]] || die "CSV file not found."
+    grep -i "$pattern" "$CSV_FILE" | column -t -s,
+}
+
+# ---------- dispatch ------------------------------------------------------
+case "${1:-run}" in
+    run)    shift; cmd_run "$@" ;;
+    add)    shift; cmd_add "$@" ;;
+    remove) shift; cmd_remove "$@" ;;
+    list)   shift; cmd_list "$@" ;;
+    search) shift; cmd_search "$@" ;;
+    *)      die "Unknown command: $1.  Use run/add/remove/list/search." ;;
+esac
+TMUX_SERVICE_EOF
+
+    chmod +x "${svc_dir}/tmux-service"
+    ok "tmux-service installed to ${svc_dir}"
+
+    # Create an empty CSV if it doesn't exist
+    if [[ ! -f "${HOME}/tmux-service.csv" ]]; then
+        echo 'name,cmd,tmux_layout_json' > "${HOME}/tmux-service.csv"
+        ok "Created empty ~/tmux-service.csv"
+    fi
+}
+
+# ============================================================================
+# 8.  Zsh aliases: windows-home, msys2-temp
+# ============================================================================
+step_zsh_aliases() {
+    info "Step 8 — Adding zsh aliases (windows-home, msys2-temp) …"
+    local zshrc="${HOME}/.zshrc"
+
+    if grep -q "alias windows-home" "$zshrc" 2>/dev/null; then
+        ok "Aliases already present."
+        return
+    fi
+
+    if confirm "Add windows-home and msys2-temp aliases to ~/.zshrc?"; then
+        cat >> "$zshrc" <<'ZSH_ALIASES_EOF'
+
+# --- MSYS2 convenience aliases ---
+# Step into the Windows user home directory (HOMEPATH → msys2 path)
+alias windows-home='cd "$(cygpath -u "$HOMEPATH")"'
+
+# Force temporary directories to /tmp for the current shell
+alias msys2-temp='export TMP=/tmp; export TEMP=/tmp'
+ZSH_ALIASES_EOF
+        ok "Aliases added to ~/.zshrc"
+    fi
+}
+
+# ============================================================================
+# 9.  Main wizard
+# ============================================================================
+main() {
+    echo "============================================================"
+    echo "  MSYS2 Init Wizard  (mode: ${MODE})"
+    echo "============================================================"
+    echo
+
+    step_install_base
+    echo
+    step_install_pacman_mingw
+    echo
+    step_install_dev_packages
+    echo
+    step_tmux_zsh
+    echo
+    step_install_oh_my_zsh
+    echo
+    step_install_tmux_service
+    echo
+    step_zsh_aliases
+    echo
+
+    echo "============================================================"
+    ok "Wizard finished.  Open a new zsh session to pick up changes."
+    echo "============================================================"
+}
+
+main "$@"
