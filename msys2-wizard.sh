@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # msys2-init.sh — wizard for a Zsh + tmux + MSYS2/MINGW development environment
-# Never writes to MINGW_PACKAGE_PREFIX. Safe to re‑run.
+# Never writes to MINGW_PACKAGE_PREFIX. Safe to re-run.
 
 set -euo pipefail
 
@@ -43,11 +43,13 @@ fi
 # ============================================================================
 # 2.  Install base packages via pacman (MSYS2 side)
 # ============================================================================
+# NOTE: jq is intentionally NOT installed here — see step 4, where the user
+# chooses between pacman / pacman-mingw / skip.
 step_install_base() {
-    info "Step 2 — Installing base packages (tmux, zsh, perl‑text‑csv, jq, git) …"
-    if confirm "Install tmux, zsh, perl-text-csv, jq, git via pacman?"; then
+    info "Step 2 — Installing base packages (tmux, zsh, perl-text-csv, git) …"
+    if confirm "Install tmux, zsh, perl-text-csv, git, pactoys via pacman?"; then
         pacman -S --needed --noconfirm \
-            tmux zsh perl-text-csv jq git pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
+            tmux zsh perl-text-csv git pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
         ok "Base packages installed."
     else
         warn "Skipped base package installation."
@@ -55,10 +57,10 @@ step_install_base() {
 }
 
 # ============================================================================
-# 3.  Install pacman‑mingw wrapper + completions
+# 3.  Install pacman-mingw wrapper + completions
 # ============================================================================
 step_install_pacman_mingw() {
-    info "Step 3 — Installing pacman‑mingw wrapper …"
+    info "Step 3 — Installing pacman-mingw wrapper …"
 
     local wrapper_dir="${HOME}/.local/bin"
     mkdir -p "$wrapper_dir"
@@ -101,6 +103,9 @@ PACMAN_MINGW_EOF
     chmod +x "${wrapper_dir}/pacman-mingw"
     ok "pacman-mingw installed to ${wrapper_dir}"
 
+    # Make pacman-mingw available to the rest of this script immediately.
+    export PATH="${wrapper_dir}:$PATH"
+
     # ----- Zsh completions -------------------------------------------------
     local zshrc="${HOME}/.zshrc"
     if [[ -f "$zshrc" ]] && grep -q "compdef pacman-mingw" "$zshrc"; then
@@ -118,21 +123,77 @@ ZSH_COMPDEF_EOF
         fi
     fi
 
-    # Ensure ~/.local/bin is on PATH
+    # Ensure ~/.local/bin is on PATH for future shells
     if [[ ":$PATH:" != *":${wrapper_dir}:"* ]]; then
         warn "${wrapper_dir} is not on PATH. Add it to your shell profile."
     fi
 }
 
 # ============================================================================
-# 4.  Install MINGW‑side development packages via pacman‑mingw
+# 4.  Install jq — user chooses pacman / pacman-mingw / skip
+# ============================================================================
+step_install_jq() {
+    info "Step 4 — Installing jq …"
+    echo
+    echo "  jq is required at runtime by the tmux-service CLI (installed later)."
+    echo "  Choose how jq should be installed:"
+    echo
+    if [[ "$MODE" == "mingw" ]]; then
+        echo "    1) pacman        — MSYS2-side jq (path: /usr/bin/jq)"
+        echo "    2) pacman-mingw  — MINGW-side jq (pkg: ${MINGW_PACKAGE_PREFIX}-jq)"
+        echo "    3) do not install — skip jq entirely"
+    else
+        echo "    1) pacman        — MSYS2-side jq (path: /usr/bin/jq)"
+        echo "    2) pacman-mingw  — MINGW-side jq (in MSYS2 mode this is just pacman)"
+        echo "    3) do not install — skip jq entirely"
+    fi
+    echo
+    echo "  Note: tmux-service will fail at runtime until jq is available on PATH."
+    echo
+
+    local choice
+    read -r -p "$(printf "${YELLOW}Select [1/2/3] (default: 1): ${NC}")" choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+        1)
+            if confirm "Install jq via pacman?"; then
+                pacman -S --needed --noconfirm jq 2>&1 | tee -a /tmp/msys2-init-pacman.log
+                ok "jq installed via pacman."
+            else
+                warn "Skipped jq installation (via pacman)."
+            fi
+            ;;
+        2)
+            if [[ "$MODE" != "mingw" ]]; then
+                warn "Not in a MINGW environment — pacman-mingw will pass through to plain pacman."
+            fi
+            if confirm "Install jq via pacman-mingw?"; then
+                pacman-mingw -S --needed --noconfirm jq 2>&1 | tee -a /tmp/msys2-init-pacman.log
+                ok "jq installed via pacman-mingw."
+            else
+                warn "Skipped jq installation (via pacman-mingw)."
+            fi
+            ;;
+        3)
+            warn "Skipping jq."
+            warn "Install it later with 'pacman -S jq' or 'pacman-mingw -S jq'."
+            ;;
+        *)
+            warn "Invalid choice '${choice}' — skipping jq."
+            ;;
+    esac
+}
+
+# ============================================================================
+# 5.  Install MINGW-side development packages via pacman-mingw
 # ============================================================================
 step_install_dev_packages() {
-    info "Step 4 — Installing MINGW development packages …"
+    info "Step 5 — Installing MINGW development packages …"
 
     if [[ "$MODE" != "mingw" ]]; then
-        warn "Not in a MINGW environment.  Skipping MINGW‑side packages."
-        warn "Open a 'MSYS2 MINGW64' shell and re‑run this step if needed."
+        warn "Not in a MINGW environment.  Skipping MINGW-side packages."
+        warn "Open a 'MSYS2 MINGW64' shell and re-run this step if needed."
         return
     fi
 
@@ -166,10 +227,10 @@ step_install_dev_packages() {
 }
 
 # ============================================================================
-# 5.  tmux default shell → zsh
+# 6.  tmux default shell → zsh
 # ============================================================================
 step_tmux_zsh() {
-    info "Step 5 — Setting tmux default shell to zsh …"
+    info "Step 6 — Setting tmux default shell to zsh …"
     local tmux_conf="${HOME}/.tmux.conf"
     if grep -q 'default-shell.*zsh' "$tmux_conf" 2>/dev/null; then
         ok "tmux default-shell already set to zsh."
@@ -182,10 +243,10 @@ step_tmux_zsh() {
 }
 
 # ============================================================================
-# 6.  Install oh‑my‑zsh from fufurobot/oh-my-zsh-git-msys2
+# 7.  Install oh-my-zsh from fufurobot/oh-my-zsh-git-msys2
 # ============================================================================
 step_install_oh_my_zsh() {
-    info "Step 6 — Installing oh‑my‑zsh (fufurobot/oh-my-zsh-git-msys2) …"
+    info "Step 7 — Installing oh-my-zsh (fufurobot/oh-my-zsh-git-msys2) …"
 
     if [[ -d /usr/share/oh-my-zsh ]]; then
         ok "oh-my-zsh already installed at /usr/share/oh-my-zsh."
@@ -206,10 +267,10 @@ step_install_oh_my_zsh() {
 }
 
 # ============================================================================
-# 7.  Install tmux‑service CLI
+# 8.  Install tmux-service CLI
 # ============================================================================
 step_install_tmux_service() {
-    info "Step 7 — Installing tmux-service CLI …"
+    info "Step 8 — Installing tmux-service CLI …"
 
     local svc_dir="${HOME}/.local/bin"
     mkdir -p "$svc_dir"
@@ -326,10 +387,10 @@ TMUX_SERVICE_EOF
 }
 
 # ============================================================================
-# 8.  Zsh aliases: windows-home, msys2-temp
+# 9.  Zsh aliases: windows-home, msys2-temp
 # ============================================================================
 step_zsh_aliases() {
-    info "Step 8 — Adding zsh aliases (windows-home, msys2-temp) …"
+    info "Step 9 — Adding zsh aliases (windows-home, msys2-temp) …"
     local zshrc="${HOME}/.zshrc"
 
     if grep -q "alias windows-home" "$zshrc" 2>/dev/null; then
@@ -352,7 +413,7 @@ ZSH_ALIASES_EOF
 }
 
 # ============================================================================
-# 9.  Main wizard
+# 10. Main wizard
 # ============================================================================
 main() {
     echo "============================================================"
@@ -363,6 +424,8 @@ main() {
     step_install_base
     echo
     step_install_pacman_mingw
+    echo
+    step_install_jq
     echo
     step_install_dev_packages
     echo
