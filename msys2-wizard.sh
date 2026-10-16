@@ -40,17 +40,58 @@ else
     info "Detected MSYS2 environment (no MINGW_PACKAGE_PREFIX)"
 fi
 
+# Shell mode is chosen by the user in step 2.
+SHELL_MODE="bash"           # bash | oh-my-zsh
+RC_FILE="${HOME}/.bashrc"   # updated by choose_shell_mode
+
 # ============================================================================
-# 2.  Install base packages via pacman (MSYS2 side)
+# 2.  Choose shell mode (bash is the default)
 # ============================================================================
-# NOTE: jq and git are intentionally NOT installed here — see step 4, where
+choose_shell_mode() {
+    info "Step 2 — Choose shell mode …"
+    echo
+    echo "    1) bash (default)"
+    echo "         • configs written to ~/.bashrc"
+    echo "         • zsh is NOT installed"
+    echo "         • tmux default-shell is NOT changed"
+    echo
+    echo "    2) oh-my-zsh"
+    echo "         • installs zsh + oh-my-zsh"
+    echo "         • copies /usr/share/oh-my-zsh template to ~/.zshrc"
+    echo "         • configs written to ~/.zshrc (appended AFTER oh-my-zsh init)"
+    echo "         • tmux default-shell set to /usr/bin/zsh"
+    echo
+    local choice
+    read -r -p "$(printf "${YELLOW}Select [1/2] (default: 1): ${NC}")" choice
+    case "${choice:-1}" in
+        2)
+            SHELL_MODE="oh-my-zsh"
+            RC_FILE="${HOME}/.zshrc"
+            ;;
+        *)
+            SHELL_MODE="bash"
+            RC_FILE="${HOME}/.bashrc"
+            ;;
+    esac
+    ok "Shell mode: ${SHELL_MODE}  (rc file: ${RC_FILE})"
+}
+
+# ============================================================================
+# 3.  Install base packages via pacman (MSYS2 side)
+# ============================================================================
+# NOTE: jq and git are intentionally NOT installed here — see step 5, where
 # the user chooses between pacman / pacman-mingw / skip for each.
 # NOTE: perl-text-csv is deliberately NEVER installed.
+# NOTE: zsh is installed here ONLY in oh-my-zsh mode.
 step_install_base() {
-    info "Step 2 — Installing base packages (tmux, zsh, pactoys) …"
-    if confirm "Install tmux, zsh, pactoys via pacman?"; then
-        pacman -S --needed --noconfirm \
-            tmux zsh pactoys 2>&1 | tee /tmp/msys2-init-pacman.log
+    info "Step 3 — Installing base packages …"
+
+    local pkgs=(tmux pactoys)
+    [[ "$SHELL_MODE" == "oh-my-zsh" ]] && pkgs+=(zsh)
+
+    info "The following packages will be installed via pacman: ${pkgs[*]}"
+    if confirm "Install ${pkgs[*]} via pacman?"; then
+        pacman -S --needed --noconfirm "${pkgs[@]}" 2>&1 | tee /tmp/msys2-init-pacman.log
         ok "Base packages installed."
     else
         warn "Skipped base package installation."
@@ -58,10 +99,10 @@ step_install_base() {
 }
 
 # ============================================================================
-# 3.  Install pacman-mingw wrapper + completions
+# 4.  Install pacman-mingw wrapper + completions
 # ============================================================================
 step_install_pacman_mingw() {
-    info "Step 3 — Installing pacman-mingw wrapper …"
+    info "Step 4 — Installing pacman-mingw wrapper …"
 
     local wrapper_dir="${HOME}/.local/bin"
     mkdir -p "$wrapper_dir"
@@ -107,20 +148,21 @@ PACMAN_MINGW_EOF
     # Make pacman-mingw available to the rest of this script immediately.
     export PATH="${wrapper_dir}:$PATH"
 
-    # ----- Zsh completions -------------------------------------------------
-    local zshrc="${HOME}/.zshrc"
-    if [[ -f "$zshrc" ]] && grep -q "compdef pacman-mingw" "$zshrc"; then
-        ok "Zsh completions for pacman-mingw already present."
-    else
-        if confirm "Add pacman-mingw completions to ~/.zshrc?"; then
-            cat >> "$zshrc" <<'ZSH_COMPDEF_EOF'
+    # ----- Zsh completions (only in oh-my-zsh mode) ------------------------
+    if [[ "$SHELL_MODE" == "oh-my-zsh" ]]; then
+        if [[ -f "$RC_FILE" ]] && grep -q "compdef pacman-mingw" "$RC_FILE"; then
+            ok "Zsh completions for pacman-mingw already present."
+        else
+            if confirm "Add pacman-mingw completions to ${RC_FILE}?"; then
+                cat >> "$RC_FILE" <<'ZSH_COMPDEF_EOF'
 
 # --- pacman-mingw completions (share pacman completions) ---
 if [[ -n "${MINGW_PACKAGE_PREFIX:-}" ]]; then
     compdef _pacman pacman-mingw=pacman
 fi
 ZSH_COMPDEF_EOF
-            ok "Completions added to ~/.zshrc"
+                ok "Completions added to ${RC_FILE}"
+            fi
         fi
     fi
 
@@ -131,16 +173,15 @@ ZSH_COMPDEF_EOF
 }
 
 # ============================================================================
-# 4.  Install jq and git — user chooses pacman / pacman-mingw / skip for each
+# 5.  Install jq and git — user chooses pacman / pacman-mingw / skip for each
 # ============================================================================
 step_install_jq_git() {
-    info "Step 4 — Installing jq and git …"
+    info "Step 5 — Installing jq and git …"
     echo
     echo "  Both jq and git are needed by various tools (tmux-service uses jq;"
     echo "  development workflows use git).  Choose how each should be installed."
     echo
 
-    # Helper: ask for one package and install accordingly.
     _install_one() {
         local pkg="$1"
         local choice
@@ -194,12 +235,12 @@ step_install_jq_git() {
 }
 
 # ============================================================================
-# 5.  Install MINGW-side development packages via pacman-mingw
+# 6.  Install MINGW-side development packages via pacman-mingw
 # ============================================================================
 # NOTE: python-playwright does NOT exist in MINGW/MSYS2 repos — it is
-# installed via pipx in step 6 instead.
+# installed via pipx in step 7 instead.
 step_install_dev_packages() {
-    info "Step 5 — Installing MINGW development packages …"
+    info "Step 6 — Installing MINGW development packages …"
 
     if [[ "$MODE" != "mingw" ]]; then
         warn "Not in a MINGW environment.  Skipping MINGW-side packages."
@@ -236,7 +277,7 @@ step_install_dev_packages() {
 }
 
 # ============================================================================
-# 6.  Install Playwright via pipx (MINGW-side)
+# 7.  Install Playwright via pipx (MINGW-side)
 # ============================================================================
 # Workaround for https://github.com/msys2/MINGW-packages/issues/30922 :
 # pipx implicitly prefers the `uv` backend whenever uv is on PATH, but uv
@@ -244,7 +285,7 @@ step_install_dev_packages() {
 # fails.  Setting PIPX_DEFAULT_BACKEND=pip forces pipx to use the pip/venv
 # backend, which works correctly on MSYS2/MINGW.
 step_install_playwright() {
-    info "Step 6 — Installing Playwright via pipx …"
+    info "Step 7 — Installing Playwright via pipx …"
 
     if [[ "$MODE" != "mingw" ]]; then
         warn "Not in a MINGW environment.  Skipping Playwright installation."
@@ -252,7 +293,6 @@ step_install_playwright() {
         return
     fi
 
-    # python-pipx is installed in step 5 (dev packages).
     if ! command -v pipx >/dev/null 2>&1; then
         warn "pipx not found.  Install it first with: pacman-mingw -S python-pipx"
         return
@@ -284,10 +324,77 @@ step_install_playwright() {
 }
 
 # ============================================================================
-# 7.  tmux default shell → zsh
+# 8.  Install oh-my-zsh (only in oh-my-zsh mode)
+# ============================================================================
+# Order matters: install the package, then copy the shipped template to
+# ~/.zshrc (if ~/.zshrc does not yet source oh-my-zsh).  All later steps
+# APPEND to ~/.zshrc, so our custom lines always come after
+# `source $ZSH/oh-my-zsh.sh`.
+step_install_oh_my_zsh() {
+    info "Step 8 — Installing oh-my-zsh …"
+
+    if [[ "$SHELL_MODE" != "oh-my-zsh" ]]; then
+        info "bash mode selected — skipping oh-my-zsh installation."
+        return
+    fi
+
+    local omz_dir="/usr/share/oh-my-zsh"
+    local tmpl="${omz_dir}/templates/zshrc.zsh-template"
+
+    # ---- 8a. Install the package -----------------------------------------
+    if [[ -d "$omz_dir" ]]; then
+        ok "oh-my-zsh already installed at ${omz_dir}."
+    else
+        if ! confirm "Clone and build fufurobot/oh-my-zsh-git-msys2?"; then
+            warn "Skipped oh-my-zsh installation."
+            return
+        fi
+        local build_dir
+        build_dir="$(mktemp -d)"
+        git clone https://github.com/fufurobot/oh-my-zsh-git-msys2.git "$build_dir"
+        (cd "$build_dir" && makepkg -si --noconfirm)
+        rm -rf "$build_dir"
+        ok "oh-my-zsh installed."
+    fi
+
+    # ---- 8b. Copy the shipped template to ~/.zshrc ------------------------
+    # This must happen BEFORE any later step appends our custom config.
+    if [[ ! -f "$tmpl" ]]; then
+        warn "Template ${tmpl} not found — skipping ~/.zshrc seed."
+        warn "Create ~/.zshrc manually and re-run if needed."
+        return
+    fi
+
+    if [[ ! -f "$RC_FILE" ]]; then
+        cp "$tmpl" "$RC_FILE"
+        ok "Seeded ${RC_FILE} from ${tmpl}."
+    elif ! grep -q 'oh-my-zsh\.sh' "$RC_FILE"; then
+        warn "${RC_FILE} exists but does not source oh-my-zsh.sh."
+        if confirm "Prepend the oh-my-zsh template to ${RC_FILE}?"; then
+            local tmp
+            tmp="$(mktemp)"
+            cat "$tmpl" "$RC_FILE" > "$tmp"
+            mv "$tmp" "$RC_FILE"
+            ok "Prepended oh-my-zsh template to ${RC_FILE}."
+        else
+            warn "Leaving ${RC_FILE} untouched — you must source oh-my-zsh.sh yourself."
+        fi
+    else
+        ok "${RC_FILE} already sources oh-my-zsh.sh."
+    fi
+}
+
+# ============================================================================
+# 9.  tmux default shell → zsh (only in oh-my-zsh mode)
 # ============================================================================
 step_tmux_zsh() {
-    info "Step 7 — Setting tmux default shell to zsh …"
+    info "Step 9 — Setting tmux default shell to zsh …"
+
+    if [[ "$SHELL_MODE" != "oh-my-zsh" ]]; then
+        info "bash mode selected — leaving tmux default-shell untouched."
+        return
+    fi
+
     local tmux_conf="${HOME}/.tmux.conf"
     if grep -q 'default-shell.*zsh' "$tmux_conf" 2>/dev/null; then
         ok "tmux default-shell already set to zsh."
@@ -300,34 +407,10 @@ step_tmux_zsh() {
 }
 
 # ============================================================================
-# 8.  Install oh-my-zsh from fufurobot/oh-my-zsh-git-msys2
-# ============================================================================
-step_install_oh_my_zsh() {
-    info "Step 8 — Installing oh-my-zsh (fufurobot/oh-my-zsh-git-msys2) …"
-
-    if [[ -d /usr/share/oh-my-zsh ]]; then
-        ok "oh-my-zsh already installed at /usr/share/oh-my-zsh."
-        return
-    fi
-
-    if ! confirm "Clone and build fufurobot/oh-my-zsh-git-msys2?"; then
-        warn "Skipped oh-my-zsh installation."
-        return
-    fi
-
-    local build_dir
-    build_dir="$(mktemp -d)"
-    git clone https://github.com/fufurobot/oh-my-zsh-git-msys2.git "$build_dir"
-    (cd "$build_dir" && makepkg -si --noconfirm)
-    rm -rf "$build_dir"
-    ok "oh-my-zsh installed."
-}
-
-# ============================================================================
-# 9.  Install tmux-service CLI (JSONL-backed)
+# 10. Install tmux-service CLI (JSONL-backed)
 # ============================================================================
 step_install_tmux_service() {
-    info "Step 9 — Installing tmux-service CLI …"
+    info "Step 10 — Installing tmux-service CLI …"
 
     local svc_dir="${HOME}/.local/bin"
     mkdir -p "$svc_dir"
@@ -359,7 +442,6 @@ die() { echo "tmux-service: $*" >&2; exit 1; }
 require_tmux() { command -v tmux >/dev/null 2>&1 || die "tmux not found"; }
 require_jq()   { command -v jq   >/dev/null 2>&1 || die "jq not found (required to parse ${JSONL_FILE})"; }
 
-# Print "name<TAB>cmd<TAB>layout" for every entry in the JSONL file.
 iter_entries() {
     require_jq
     [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
@@ -376,13 +458,11 @@ cmd_run() {
         require_jq
         [[ -f "$JSONL_FILE" ]] || die "JSONL file not found: $JSONL_FILE"
 
-        # Read every cmd (one per line) into the array.
         local line
         while IFS= read -r line; do
             cmds+=("$line")
         done < <(jq -r '.cmd' "$JSONL_FILE")
 
-        # Honor the layout of the first entry, if present.
         if [[ -s "$JSONL_FILE" ]]; then
             layout="$(jq -r --arg d "$DEFAULT_LAYOUT" '.layout.layout // $d' "$JSONL_FILE" | head -n1)"
         fi
@@ -392,7 +472,6 @@ cmd_run() {
         die "No commands to run (JSONL file is empty and no args given)."
     fi
 
-    # Ensure session/window exist
     if ! tmux has-session -t "$SESSION" 2>/dev/null; then
         tmux new-session -d -s "$SESSION" -n "$WINDOW"
     else
@@ -476,7 +555,6 @@ TMUX_SERVICE_EOF
     chmod +x "${svc_dir}/tmux-service"
     ok "tmux-service installed to ${svc_dir}"
 
-    # Create an empty JSONL file if it doesn't exist.
     if [[ ! -f "${HOME}/tmux-service.jsonl" ]]; then
         : > "${HOME}/tmux-service.jsonl"
         ok "Created empty ~/tmux-service.jsonl"
@@ -484,19 +562,21 @@ TMUX_SERVICE_EOF
 }
 
 # ============================================================================
-# 10. Zsh aliases: windows-home, msys2-temp
+# 11. Shell aliases: windows-home, msys2-temp
 # ============================================================================
-step_zsh_aliases() {
-    info "Step 10 — Adding zsh aliases (windows-home, msys2-temp) …"
-    local zshrc="${HOME}/.zshrc"
+# Appended to ${RC_FILE}, i.e. ~/.bashrc in bash mode or ~/.zshrc in
+# oh-my-zsh mode.  In oh-my-zsh mode this runs AFTER step 8 seeded ~/.zshrc
+# from the oh-my-zsh template, so our lines come after the oh-my-zsh init.
+step_shell_aliases() {
+    info "Step 11 — Adding shell aliases (windows-home, msys2-temp) to ${RC_FILE} …"
 
-    if grep -q "alias windows-home" "$zshrc" 2>/dev/null; then
-        ok "Aliases already present."
+    if [[ -f "$RC_FILE" ]] && grep -q "alias windows-home" "$RC_FILE"; then
+        ok "Aliases already present in ${RC_FILE}."
         return
     fi
 
-    if confirm "Add windows-home and msys2-temp aliases to ~/.zshrc?"; then
-        cat >> "$zshrc" <<'ZSH_ALIASES_EOF'
+    if confirm "Add windows-home and msys2-temp aliases to ${RC_FILE}?"; then
+        cat >> "$RC_FILE" <<'SHELL_ALIASES_EOF'
 
 # --- MSYS2 convenience aliases ---
 # Step into the Windows user home directory (HOMEPATH → msys2 path)
@@ -504,13 +584,13 @@ alias windows-home='cd "$(cygpath -u "$HOMEPATH")"'
 
 # Force temporary directories to /tmp for the current shell
 alias msys2-temp='export TMP=/tmp; export TEMP=/tmp'
-ZSH_ALIASES_EOF
-        ok "Aliases added to ~/.zshrc"
+SHELL_ALIASES_EOF
+        ok "Aliases added to ${RC_FILE}"
     fi
 }
 
 # ============================================================================
-# 11. Main wizard
+# 12. Main wizard
 # ============================================================================
 main() {
     echo "============================================================"
@@ -518,6 +598,8 @@ main() {
     echo "============================================================"
     echo
 
+    choose_shell_mode
+    echo
     step_install_base
     echo
     step_install_pacman_mingw
@@ -528,17 +610,19 @@ main() {
     echo
     step_install_playwright
     echo
-    step_tmux_zsh
-    echo
     step_install_oh_my_zsh
+    echo
+    step_tmux_zsh
     echo
     step_install_tmux_service
     echo
-    step_zsh_aliases
+    step_shell_aliases
     echo
 
     echo "============================================================"
-    ok "Wizard finished.  Open a new zsh session to pick up changes."
+    ok "Wizard finished.  Open a new shell to pick up changes."
+    echo "    shell mode : ${SHELL_MODE}"
+    echo "    rc file    : ${RC_FILE}"
     echo "============================================================"
 }
 
