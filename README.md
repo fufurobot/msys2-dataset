@@ -20,8 +20,42 @@ Match **Arch Linux** (`core`, `extra`, `AUR`) packages against **MSYS2** and
 # TODOs
 
 - [ ] deepseek use `node` to escape from sandbox, which is ugly and not necessary because user are not expected to install `node`, and even the `envrionment.yml` does not specify `node` as dependency. A `requests` call is much better to not introduce the heavy `node`. 
+- [ ] mine heuristic PKGBUILD migration, like appending $MINGW_PACKAGE_PREFIX, ...
 
+# MSYS2 wizard
 
+`msys2-wizard.sh` shows how to bootstrap a msys2 environment for basic development. it also shows how to transform and build AUR packages by cloning the [oh-my-zsh-git](https://aur.archlinux.org/packages/oh-my-zsh-git) first, then committing and modifing as [oh-my-zsh-git-msys2](https://github.com/fufurobot/oh-my-zsh-git-msys2). One of the main objective of this dataset is to mine heuristic patterns to migrate the Arch echo into msys2. 
+
+```mermaid
+graph TD
+    SM["1. choose_shell_mode<br/><i>sets SHELL_MODE + RC_FILE</i>"]
+    BASE["2. install_base<br/><i>tmux, pactoys, +zsh if omz</i>"]
+    WRAP["3. install_pacman_mingw<br/><i>wrapper file + PATH export only</i>"]
+    JG["4. install_jq_git<br/><i>per-pkg: pacman / pacman-mingw / skip</i>"]
+    OMZ["5. install_oh_my_zsh<br/><i>omz only; installs pkg + seeds RC_FILE</i>"]
+    CD["6. configure_pacman_mingw_completion<br/><i>omz only; appends compdef to RC_FILE</i>"]
+    DEV["7. install_dev_packages"]
+    PW["8. install_playwright"]
+    TZ["9. tmux_zsh<br/><i>omz only</i>"]
+    SVC["10. install_tmux_service"]
+    CFG["11. shell_config<br/><i>PATH + aliases</i>"]
+
+    SM -->|"decides which rc file to write to"| BASE
+    BASE -->|"must install zsh before omz pkg build"| OMZ
+    BASE -->|"host env ready"| WRAP
+    WRAP -->|"pacman-mingw must exist before step 4 may call it"| JG
+    JG -->|"git needed to clone oh-my-zsh repo"| OMZ
+    WRAP -->|"compdef references pacman-mingw, so wrapper must exist"| CD
+    OMZ -->|"seeding RC_FILE clobbers prior appends → compdef must be AFTER"| CD
+    CD -->|"shell completion finalized"| DEV
+    DEV -->|"provides pipx (installed as python-pipx)"| PW
+    BASE -->|"needs zsh binary for tmux default-shell"| TZ
+    DEV -->|"tmux-service uses jq at runtime"| SVC
+    PW -->|"playwright binary on PATH"| SVC
+    TZ -->|"tmux configured"| SVC
+    CD -->|"RC_FILE already contains compdef"| CFG
+    SVC -->|"writes last to RC_FILE"| CFG
+```
 
 ## Why Arch is the reference point
 
