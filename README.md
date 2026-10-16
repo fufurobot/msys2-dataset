@@ -1,12 +1,14 @@
 <!-- badges -->
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/fufurobot/msys2-dataset/HEAD)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/fufurobot/msys2-dataset)
 [![DataLad](https://img.shields.io/badge/DataLad-dataset-blue)](https://handbook.datalad.org/)
 [![Tests](https://github.com/fufurobot/msys2-dataset/actions/workflows/tests.yml/badge.svg)](https://github.com/fufurobot/msys2-dataset/actions/workflows/tests.yml)
 [![TestPyPI](https://img.shields.io/badge/TestPyPI-v0.1.0-blue)](https://test.pypi.org/project/msys2-dataset/)
 [![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97%20Hub-dataset-yellow)](https://huggingface.co/datasets/fufurobot/msys2-dataset)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/fufurobot/msys2-dataset)
+
 # msys2-dataset
 
 Match **Arch Linux** (`core`, `extra`, `AUR`) packages against **MSYS2** and
